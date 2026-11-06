@@ -1,0 +1,52 @@
+# X. Паритет разработки и продакшена: локально поднимается тот же PostgreSQL
+# и то же приложение, что и в проде, одной командой `docker compose up`.
+#
+# Пароль БД здесь — локальный dev-дефолт для одноразовой базы внутри compose-сети;
+# он переопределяется переменными окружения (compose читает их из .env):
+#   POSTGRES_PASSWORD=... docker compose up
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-taskflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskflow}
+      POSTGRES_DB: ${POSTGRES_DB:-taskflow}
+    ports:
+      # Только loopback: база не должна быть видна локальной сети.
+      # Маппинг нужен лишь для psql с хоста — приложение ходит по compose-сети.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskflow} -d ${POSTGRES_DB:-taskflow}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ["node", "src/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-taskflow}:${POSTGRES_PASSWORD:-taskflow}@db:5432/${POSTGRES_DB:-taskflow}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-taskflow}:${POSTGRES_PASSWORD:-taskflow}@db:5432/${POSTGRES_DB:-taskflow}
+      PORT: 3000
+      NODE_ENV: production
+    ports:
+      # Только loopback: у API нет аутентификации, наружу его не публикуем.
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

@@ -1,0 +1,16 @@
+# Отдельное пространство имён для инфраструктуры логирования: хранилище
+# (Victoria Logs) и шиппер (Vector) живут и удаляются отдельно от приложения.
+#
+# Pod Security Admission здесь — privileged, а не restricted, как у taskflow:
+# шипперу нужны hostPath-тома (/var/log/pods, /var/lib/docker/containers) и
+# запуск от root, чтобы читать файлы логов kubelet'а — профиль restricted
+# (и даже baseline) такой под не пропустит. Сам Victoria Logs при этом
+# запускается с ограничениями уровня restricted (см. 10-victoria-logs.yaml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+  labels:
+    app.kubernetes.io/part-of: taskflow-logging
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged

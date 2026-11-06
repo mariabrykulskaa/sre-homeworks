@@ -1,0 +1,147 @@
+# Бонус: vmalert вычисляет LogsQL-правила прямо по Victoria Logs
+# (через /select/logsql/stats_query) и шлёт сработавшие алерты в Alertmanager.
+# Метрики для этого не нужны: источник правды — те же логи, что и в vmui.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: vmalert
+    app.kubernetes.io/part-of: taskflow-logging
+data:
+  taskflow.rules.yaml: |
+    groups:
+      # type: vlogs — выражения на LogsQL, а не MetricsQL. Группа вычисляется
+      # раз в 30 с; окно данных задано в самом запросе фильтром _time:5m
+      # (без него vmalert подставил бы _time:<interval>, то есть 30 с).
+      - name: taskflow-logs
+        type: vlogs
+        interval: 30s
+        rules:
+          # Правило на основе запроса (б) из отчёта: есть ли у приложения
+          # записи level=error. stats даёт метрику, filter — порог; если ни одна
+          # строка не прошла filter, результат пуст и алерт не горит.
+          - alert: TaskflowErrorLogs
+            expr: >-
+              _time:5m service.name:taskflow level:error
+              | stats by (kubernetes.pod) count() as errors
+              | filter errors:>0
+            for: 1m
+            labels:
+              severity: warning
+              service: taskflow
+            annotations:
+              # Имя метки с точкой — только через index, $labels.kubernetes.pod не разберётся.
+              summary: 'В логах taskflow есть ошибки (под {{ index $labels "kubernetes.pod" }})'
+              description: >-
+                За последние 5 минут под {{ index $labels "kubernetes.pod" }} записал
+                {{ $value }} строк с level=error. Запрос в vmui:
+                service.name:taskflow level:error kubernetes.pod:{{ index $labels "kubernetes.pod" }}
+          # Правило на основе запроса (г): доля ответов 5xx в access-логе.
+          # count() if (...) считает условно, math вычисляет процент.
+          - alert: TaskflowHigh5xxRate
+            expr: >-
+              _time:5m service.name:taskflow _msg:request
+              | stats count() if (status:>=500) as failed, count() as total
+              | math round((failed / total) * 100, 0.1) as failed_percent
+              | filter failed_percent:>5
+              | fields failed_percent
+            for: 1m
+            labels:
+              severity: critical
+              service: taskflow
+            annotations:
+              summary: 'Более 5 % запросов к taskflow завершаются 5xx'
+              description: 'За последние 5 минут {{ $value }} % ответов приложения — 5xx.'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: vmalert
+    app.kubernetes.io/part-of: taskflow-logging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vmalert
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vmalert
+        app.kubernetes.io/part-of: taskflow-logging
+      annotations:
+        # Пересоздать под при изменении правил (ConfigMap сам этого не делает).
+        rules.revision: "2"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vmalert
+          image: victoriametrics/vmalert:v1.154.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -rule=/etc/vmalert/*.yaml
+            - -datasource.url=http://victoria-logs.logging.svc:9428
+            - -notifier.url=http://alertmanager.logging.svc:9093
+            - -httpListenAddr=:8880
+            # Ссылка «source» в уведомлениях — на UI vmalert через port-forward.
+            - -external.url=http://127.0.0.1:8880
+            - -loggerFormat=json
+          ports:
+            - name: http
+              containerPort: 8880
+          volumeMounts:
+            - name: rules
+              mountPath: /etc/vmalert
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: rules
+          configMap:
+            name: vmalert-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: vmalert
+    app.kubernetes.io/part-of: taskflow-logging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vmalert
+  ports:
+    - name: http
+      port: 8880
+      targetPort: http

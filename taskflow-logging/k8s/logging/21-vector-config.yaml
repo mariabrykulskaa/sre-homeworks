@@ -1,0 +1,131 @@
+# Конфигурация Vector: источник → преобразование → приёмник.
+#
+#   kubernetes_logs ──► parse_app_json ──► victoria_logs (Elasticsearch bulk API)
+#
+# Почему именно такой путь доставки — в Отчёт.md, коротко:
+#   * приложение ничего не знает о хранилище логов (пишет в stdout — XI фактор),
+#   * DaemonSet читает файлы kubelet'а на узле и переживает перезапуски подов,
+#   * один шиппер на узел вместо сайдкара в каждом поде приложения,
+#   * ES bulk — родной для Victoria Logs протокол с явным указанием, какие
+#     поля считать временем, сообщением и ключом потока.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/part-of: taskflow-logging
+data:
+  vector.yaml: |
+    # Чекпоинты прочитанных файлов — на hostPath (см. DaemonSet): после
+    # перезапуска Vector продолжает с того же места, не дублируя строки.
+    data_dir: /var/lib/vector
+
+    # Локальный API: /health для проб kubelet'а и `vector top` для отладки.
+    api:
+      enabled: true
+      address: 0.0.0.0:8686
+      # (Параметра api.playground в Vector 0.59 уже нет — GraphQL-playground
+      # вместе с ним убрали из бинарника; у API остались только /health и
+      # GraphQL для `vector top`. Порт наружу не публикуется — только containerPort.)
+
+    sources:
+      kubernetes_logs:
+        type: kubernetes_logs
+        # Только поды namespace приложения — фильтр на уровне API (watch подов),
+        # поэтому файлы чужих подов даже не открываются. Логи kube-system и самого
+        # logging (в том числе Vector'а) в хранилище не нужны — иначе ошибка
+        # доставки породила бы новую строку лога, а та — новую попытку доставки.
+        extra_field_selector: metadata.namespace=taskflow
+        # Смотреть только поды своего узла (узел берём из Downward API).
+        self_node_name: ${VECTOR_SELF_NODE_NAME}
+        # Как часто искать новые файлы логов (по умолчанию раз в 60 с —
+        # столько же ждать первых строк нового пода).
+        glob_minimum_cooldown_ms: 15000
+        # Docker (json-file) режет строки длиннее 16 КиБ на части; склеиваем.
+        auto_partial_merge: true
+        # При первом запуске забираем и старые строки: это разовый бэкфилл
+        # истории, дальше работают чекпоинты.
+        read_from: beginning
+
+    transforms:
+      parse_app_json:
+        type: remap
+        inputs: [kubernetes_logs]
+        source: |
+          # 1. Структурированные логи приложения: строка — JSON-объект.
+          #    Раскрываем его поля на верхний уровень события; при совпадении
+          #    имён (timestamp, message) приоритет у приложения — оно знает
+          #    точнее, когда и что произошло.
+          #    Метаданные пода и имя потока (stdout/stderr) запоминаем до merge
+          #    и возвращаем после: что бы приложение ни написало в полях
+          #    `kubernetes` или `stream`, источник записи оно подменить не может.
+          meta = .kubernetes
+          stream_name = .stream
+          parsed, err = parse_json(to_string(.message) ?? "")
+          if err == null && is_object(parsed) {
+            . = merge(., object!(parsed))
+            .stream = stream_name
+          } else {
+            # 2. Неструктурированные логи (PostgreSQL, init-контейнер wait-for-db):
+            #    одна строка — одно сообщение. Уровень не выдумываем, а отмечаем,
+            #    что запись сырая — в запросах её легко отфильтровать.
+            .log_format = "text"
+          }
+
+          # Единый ключ сервиса для JSON- и текстовых логов: приложение пишет
+          # service.name само; для остальных берём метку app.kubernetes.io/name
+          # пода, а если и её нет — имя контейнера.
+          if !exists(."service.name") {
+            app_label = meta.pod_labels."app.kubernetes.io/name"
+            ."service.name" = if app_label != null { app_label } else { meta.container_name }
+          }
+
+          # Метаданные пода: оставляем нужное для поиска и группировки,
+          # остальное (все labels/annotations, путь к файлу, owner) — шум.
+          # Берём из сохранённой копии, а не из события после merge.
+          # container_image Vector не заполняет у init-контейнеров —
+          # у их записей поля kubernetes.image нет.
+          .kubernetes = {
+            "namespace":  meta.pod_namespace,
+            "pod":        meta.pod_name,
+            "container":  meta.container_name,
+            "node":       meta.pod_node_name,
+            "image":      meta.container_image,
+          }
+          del(.file)
+          del(.source_type)
+
+    sinks:
+      victoria_logs:
+        type: elasticsearch
+        inputs: [parse_app_json]
+        # Victoria Logs принимает Elasticsearch bulk API на /insert/elasticsearch/
+        endpoints:
+          - http://victoria-logs.logging.svc:9428/insert/elasticsearch/
+        api_version: v8
+        mode: bulk
+        compression: gzip
+        # /_cluster/health у Victoria Logs нет — стандартная проверка ES упала бы.
+        healthcheck:
+          enabled: false
+        # Параметры разбора на стороне Victoria Logs:
+        #   _msg_field     — какое поле считать текстом сообщения (_msg)
+        #   _time_field    — какое поле считать временем события (_time)
+        #   _stream_fields — что образует поток логов (_stream): namespace/pod/
+        #                    container — стандартный набор, у него ограниченная
+        #                    кардинальность и по нему удобно искать «логи этого пода»
+        query:
+          _msg_field: message
+          _time_field: timestamp
+          _stream_fields: kubernetes.namespace,kubernetes.pod,kubernetes.container,stream
+        batch:
+          # Отправлять не реже раза в секунду — логи видны в UI почти сразу.
+          timeout_secs: 1
+        buffer:
+          # Если Victoria Logs недоступен, копим на диске (hostPath data_dir),
+          # а не в памяти: перезапуск Vector ничего не потеряет.
+          type: disk
+          max_size: 268435488
+          when_full: block

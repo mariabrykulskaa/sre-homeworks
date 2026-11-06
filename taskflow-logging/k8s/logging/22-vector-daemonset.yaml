@@ -1,0 +1,122 @@
+# Vector как DaemonSet: по одному поду на узел. Он тейлит файлы логов всех
+# подов узла (/var/log/pods/<ns>_<pod>_<uid>/<container>/*.log), которые
+# ведёт kubelet, и отправляет их в Victoria Logs.
+#
+# Почему не сайдкар: приложению не нужен ещё один контейнер в каждой реплике,
+# логи собираются и у тех подов, которые о шиппере не знают (PostgreSQL,
+# init-контейнеры), а ротация файлов и чекпоинты — забота одного процесса на узел.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/part-of: taskflow-logging
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+        app.kubernetes.io/part-of: taskflow-logging
+      annotations:
+        # Пересоздать поды при изменении конфигурации: меняйте значение
+        # вместе с ConfigMap (kubectl apply сам этого не сделает).
+        config.revision: "2"
+    spec:
+      serviceAccountName: vector
+      # Логи нужны и с control-plane-узлов (в minikube он единственный).
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vector
+          image: timberio/vector:0.59.0-distroless-libc
+          imagePullPolicy: IfNotPresent
+          args: ["--config-dir", "/etc/vector/"]
+          env:
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Логи самого Vector — JSON, как и у всех в кластере.
+            - name: VECTOR_LOG_FORMAT
+              value: json
+            - name: VECTOR_LOG
+              value: info
+          ports:
+            - name: api
+              containerPort: 8686
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector/
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/vector
+            # Файлы логов kubelet'а. С рантаймом docker (minikube по умолчанию)
+            # /var/log/pods/... — симлинки в /var/lib/docker/containers, поэтому
+            # монтируем оба каталога (оба — только чтение). Ровно /var/log/pods,
+            # а не весь /var/log: остальное (журналы узла) шипперу не нужно.
+            - name: var-log-pods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: var-lib-docker-containers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            # Файлы в /var/log/pods принадлежат root с правами 0640 — читать их
+            # может только root. Всё остальное урезано: без эскалации
+            # привилегий, без capabilities, корневая ФС только на чтение.
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: vector-config
+        # Чекпоинты и дисковый буфер — на узле, чтобы пережить перезапуск пода.
+        - name: data
+          hostPath:
+            path: /var/lib/vector
+            type: DirectoryOrCreate
+        - name: var-log-pods
+          hostPath:
+            path: /var/log/pods
+            type: Directory
+        - name: var-lib-docker-containers
+          hostPath:
+            path: /var/lib/docker/containers
+            type: DirectoryOrCreate

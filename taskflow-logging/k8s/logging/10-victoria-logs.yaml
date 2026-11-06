@@ -1,0 +1,128 @@
+# Victoria Logs single-node: один процесс, одна директория с данными.
+# Для домашнего кластера это ровно то, что нужно: без координации,
+# без внешних зависимостей, ~100 МБ памяти.
+#
+# Том: PersistentVolumeClaim, чтобы логи переживали пересоздание пода
+# (например, при обновлении образа). StorageClass по умолчанию в minikube —
+# `standard` (hostPath-provisioner).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: victoria-logs-data
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: victoria-logs
+    app.kubernetes.io/part-of: taskflow-logging
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+# Deployment, а не StatefulSet: реплика одна, стабильное сетевое имя пода
+# не нужно (к нему ходят через Service), а том — один именованный.
+# strategy: Recreate — том ReadWriteOnce нельзя примонтировать второму поду,
+# поэтому RollingUpdate здесь завис бы навсегда.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: victoria-logs
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: victoria-logs
+    app.kubernetes.io/part-of: taskflow-logging
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: victoria-logs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: victoria-logs
+        app.kubernetes.io/part-of: taskflow-logging
+    spec:
+      securityContext:
+        # Образ — статический бинарник поверх scratch, пользователь в нём
+        # не задан; запускаем от непривилегированного uid, fsGroup делает
+        # том доступным на запись.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: victoria-logs
+          image: victoriametrics/victoria-logs:v1.53.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -storageDataPath=/storage
+            - -httpListenAddr=:9428
+            # Хранить неделю; плюс жёсткий потолок по месту — чтобы шумный
+            # сосед не забил диск узла minikube раньше, чем истечёт retention.
+            - -retentionPeriod=7d
+            - -retention.maxDiskSpaceUsageBytes=1GiB
+            # Логи самого Victoria Logs — тоже JSON (единый формат в кластере).
+            - -loggerFormat=json
+          ports:
+            - name: http
+              containerPort: 9428
+          volumeMounts:
+            - name: data
+              mountPath: /storage
+          # /health отвечает 200, как только HTTP-сервер поднят; данные с диска
+          # подгружаются быстро, отдельная startup-проба не нужна.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: victoria-logs-data
+---
+# ClusterIP: внутри кластера шиппер пишет на
+# http://victoria-logs.logging.svc:9428/insert/..., снаружи UI и API
+# открываются через kubectl port-forward svc/victoria-logs -n logging 9428:9428
+# (vmui: http://localhost:9428/select/vmui/).
+apiVersion: v1
+kind: Service
+metadata:
+  name: victoria-logs
+  namespace: logging
+  labels:
+    app.kubernetes.io/name: victoria-logs
+    app.kubernetes.io/part-of: taskflow-logging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: victoria-logs
+  ports:
+    - name: http
+      port: 9428
+      targetPort: http

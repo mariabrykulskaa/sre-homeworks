@@ -1,0 +1,15 @@
+# Отдельное пространство имён: все объекты приложения живут в нём,
+# не смешиваются с системными (kube-system) и удаляются одной командой
+# `kubectl delete namespace taskflow`.
+#
+# Метки Pod Security Admission: профиль restricted принудительно требует от
+# всех подов в namespace non-root, seccomp, drop ALL capabilities и т. д.
+# Под, нарушающий профиль, API-сервер просто не создаст.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: taskflow
+  labels:
+    app.kubernetes.io/part-of: taskflow
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
