@@ -1,0 +1,140 @@
+# Алерты ДЗ №6 — дополнение к алертам SLO (slo-rules.yaml, ДЗ №5).
+#
+# Алерты SLO отвечают на вопрос «пользователи страдают настолько, что под угрозой
+# обязательства?» (сгорает бюджет ошибок). Эти отвечают на вопрос «что именно
+# сломалось и где копать?»: по ним дежурный сразу видит причину.
+#
+#   группа taskflow-service — метрики сервиса: HTTP API, пробер, PostgreSQL, сбор метрик;
+#   группа taskflow-runtime — метрики рантайма Python (prometheus_client: process_*, python_*).
+#
+# Метки, по которым Alertmanager маршрутизирует уведомления:
+#   severity  critical — будить дежурного сразу (пользователи уже страдают);
+#             warning  — разобраться в рабочее время (риск, а не авария);
+#   service   какой сервис (для группировки);
+#   kind      service | runtime — тип алерта (виден в письме).
+#
+# Запросы к API (api) — те же, что в SLI ДЗ №5: маршруты /api/projects… и
+# /api/tasks…, плюс unmatched (запросы к /api, отклонённые до маршрутизатора).
+# Пробы kubelet (/api/health, /api/ready) и статика интерфейса не считаются.
+#
+# Почему окна 5m и пауза for: короткий всплеск (одна неудачная выкатка пода,
+# секундный обрыв соединения) не должен будить человека; алерт загорается,
+# только если проблема держится. Окно 5m сглаживает шум при малом трафике.
+groups:
+  - name: taskflow-service
+    interval: 30s
+    rules:
+      # Доля ошибок сервера среди ответов API. 5 % — заметно для пользователей
+      # (каждый двадцатый запрос падает) и в 10 раз выше бюджета SLO availability
+      # (0,5 %): такой темп съест месячный бюджет за 3 дня.
+      - alert: TaskflowHighErrorRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count{job="taskflow", route=~"/api/(projects|tasks).*|unmatched", status_code=~"5.."}[5m]))
+            / sum(rate(http_request_duration_seconds_count{job="taskflow", route=~"/api/(projects|tasks).*|unmatched"}[5m]))
+          > 0.05
+        for: 2m
+        labels: { severity: critical, service: taskflow, kind: service }
+        annotations:
+          summary: 'TaskFlow: {{ $value | humanizePercentage }} ответов API — ошибки сервера (5xx)'
+          description: >-
+            За последние 5 минут больше 5 % запросов к API завершились ошибкой 5xx.
+            Где искать: логи `service.name:taskflow level:error` в Victoria Logs (поле error.message),
+            панель «Что происходит с приложением» на дашборде, недавние выкатки (`kubectl rollout history deployment/taskflow -n taskflow`).
+
+      # Медленные ответы: p95 выше порога SLI latency (250 мс). Не авария — сервис
+      # отвечает, — поэтому warning; критичность придёт через алерты SLO latency.
+      - alert: TaskflowHighLatency
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="taskflow", route=~"/api/(projects|tasks).*|unmatched"}[5m])))
+          > 0.25
+        for: 3m
+        labels: { severity: warning, service: taskflow, kind: service }
+        annotations:
+          summary: 'TaskFlow: p95 времени ответа API {{ $value | humanizeDuration }} — выше 250 мс'
+          description: >-
+            95-й перцентиль времени ответа API за 5 минут выше порога SLO latency.
+            Частые причины: медленные запросы к PostgreSQL (метрики pg_stat_* экспортера), нехватка CPU, блокировки.
+
+      # Взгляд клиента: синтетические сценарии пробера падают. Ловит то, что
+      # серверные метрики не видят: запросы не доходят до приложения (нет готовых
+      # реплик за Service, упал kube-proxy) или трафика нет вовсе.
+      - alert: TaskflowProbeFailing
+        expr: |
+          sum(rate(prober_probe_runs_total{job="taskflow-prober", result="failure"}[5m]))
+            / sum(rate(prober_probe_runs_total{job="taskflow-prober"}[5m]))
+          > 0.10
+        for: 2m
+        labels: { severity: critical, service: taskflow, kind: service }
+        annotations:
+          summary: 'TaskFlow недоступен для пользователей: {{ $value | humanizePercentage }} синтетических сценариев падают'
+          description: >-
+            Больше 10 % запусков проб за 5 минут неуспешны. На каком шаге и почему:
+            `sum by (probe, step, reason) (increase(prober_probe_failures_total[5m])) > 0` в vmui
+            или панель «Пробер: неуспешные пробы» на дашборде.
+
+      # Единственная зависимость, без которой не работает ни один запрос к данным.
+      # absent() — экспортер не присылает метрики вовсе (под БД удалён или не запустился).
+      - alert: TaskflowDatabaseDown
+        expr: |
+          (max(pg_up{job="postgres"}) < 1) or absent(pg_up{job="postgres"})
+        for: 1m
+        labels: { severity: critical, service: taskflow, kind: service }
+        annotations:
+          summary: 'PostgreSQL TaskFlow недоступна'
+          description: >-
+            postgres-exporter не может выполнить запрос к базе (pg_up = 0) или метрик базы нет совсем.
+            Проверьте под: `kubectl get pod db-0 -n taskflow`, `kubectl logs db-0 -c postgres -n taskflow`.
+
+      # Ни одна реплика приложения не отдаёт метрики: процессы упали или
+      # vmagent их не находит. Без метрик все остальные алерты слепы.
+      - alert: TaskflowMetricsDown
+        expr: |
+          absent(up{job="taskflow"} == 1)
+        for: 2m
+        labels: { severity: critical, service: taskflow, kind: service }
+        annotations:
+          summary: 'Нет ни одной реплики TaskFlow, отдающей метрики'
+          description: >-
+            vmagent не может собрать /metrics ни с одной реплики TaskFlow 2 минуты.
+            Проверьте `kubectl get pods -n taskflow` и цели vmagent (страница /targets).
+
+  - name: taskflow-runtime
+    interval: 30s
+    rules:
+      # Память процесса (RSS, prometheus_client ProcessCollector) относительно
+      # лимита контейнера из манифеста (256 MiB). На 100 % ядро убьёт процесс
+      # (OOMKilled), поэтому предупреждаем на 80 %, пока есть время разобраться:
+      # утечка (рост без спада), слишком большой ответ, неудачный релиз.
+      - alert: TaskflowHighMemoryUsage
+        expr: |
+          max by (pod) (process_resident_memory_bytes{job="taskflow"}) / (256 * 1024 * 1024) > 0.8
+        for: 2m
+        labels: { severity: warning, service: taskflow, kind: runtime }
+        annotations:
+          summary: 'TaskFlow {{ $labels.pod }}: процесс занимает {{ $value | humanizePercentage }} лимита памяти'
+          description: >-
+            Резидентная память процесса Python (process_resident_memory_bytes) больше 80 % лимита контейнера 256 MiB
+            дольше 2 минут. При достижении лимита контейнер будет убит (OOMKilled).
+            Сравните с python_gc_objects_collected_total и с моментом последней выкатки.
+
+      # Процесс в поде перезапустился: время старта процесса в окне 15 минут было
+      # разным. Это падение (необработанная ошибка, OOMKilled) или перезапуск по
+      # liveness. Новый под при выкатке сюда не попадает: у него свой ряд (метка
+      # pod) с одним временем старта. Не changes(): в MetricsQL он засчитывает
+      # «изменение» и для ряда моложе окна — каждый новый под давал бы ложный алерт.
+      # Порог 1 с, а не 0: VictoriaMetrics хранит значения с ограниченной точностью,
+      # и метка времени порядка 1.8e9 «дрожит» в седьмом знаке после запятой
+      # (1794225591.89 и 1794225591.8899999) — с «> 0» это был бы ложный перезапуск.
+      # Настоящий перезапуск сдвигает время старта как минимум на секунды.
+      - alert: TaskflowProcessRestarted
+        expr: |
+          max_over_time(process_start_time_seconds{job="taskflow"}[15m])
+            - min_over_time(process_start_time_seconds{job="taskflow"}[15m])
+          > 1
+        labels: { severity: warning, service: taskflow, kind: runtime }
+        annotations:
+          summary: 'TaskFlow {{ $labels.pod }}: процесс в поде перезапускался за последние 15 минут'
+          description: >-
+            process_start_time_seconds изменился — контейнер перезапущен внутри того же пода.
+            Причина: `kubectl describe pod {{ $labels.pod }} -n taskflow` (Last State: OOMKilled / Error),
+            логи прошлого запуска: `kubectl logs {{ $labels.pod }} -n taskflow --previous`.

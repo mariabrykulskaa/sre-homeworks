@@ -1,0 +1,10 @@
+{
+  "name": "taskflow-sla-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Зависимости скриптов ДЗ №5: playwright-core для скриншотов и покадровой записи Grafana",
+  "type": "module",
+  "dependencies": {
+    "playwright-core": "1.61.1"
+  }
+}

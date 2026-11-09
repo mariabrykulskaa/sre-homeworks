@@ -1,6 +1,6 @@
 # TaskFlow в Kubernetes (minikube)
 
-Домашнее задание №2: развёртывание приложения TaskFlow (Node.js + PostgreSQL) из первого задания
+Домашнее задание №2: развёртывание приложения TaskFlow (Python + FastAPI + PostgreSQL) из первого задания
 в однонодовом кластере minikube. Описание абстракций и взаимодействия сервисов — в [Отчёт.md](Отчёт.md).
 
 ## Состав
@@ -8,7 +8,7 @@
 ```
 k8s/
   00-namespace.yaml   Namespace taskflow (с профилем Pod Security «restricted»)
-  01-configmap.yaml   ConfigMap: порт, NODE_ENV, имя БД/пользователя, адрес Service БД
+  01-configmap.yaml   ConfigMap: порт, APP_ENV, имя БД/пользователя, адрес Service БД
   02-secret.yaml      Secret: пароль PostgreSQL
   10-postgres.yaml    Headless Service db + StatefulSet PostgreSQL с PersistentVolumeClaim
   20-app.yaml         Deployment taskflow (init-контейнеры: ожидание БД, миграции) + Service NodePort
@@ -21,9 +21,9 @@ scripts/
 app/                  (в архиве) исходники приложения и его Dockerfile
 ```
 
-Исходники приложения и Dockerfile живут в соседнем каталоге `../homework1` — одна кодовая база,
+Исходники приложения и Dockerfile живут в соседнем каталоге `../app` — одна кодовая база,
 один Dockerfile. Скрипт архивации копирует их в `app/`, и скрипты сборки сами находят
-`app/Dockerfile`, если он есть (иначе `../homework1`; переопределить — переменной `APP_DIR`).
+`app/Dockerfile`, если он есть (иначе `../app`; переопределить — переменной `APP_DIR`).
 
 ## Быстрый старт
 
@@ -46,7 +46,7 @@ minikube service taskflow -n taskflow      # на macOS NodePort доступе�
 ```bash
 eval $(minikube docker-env)                # bash/zsh
 minikube docker-env | source               # fish
-docker build -t taskflow:1.0 ../homework1  # или ./app в распакованном архиве
+docker build -t taskflow:2.0 ../app        # или ./app в распакованном архиве
 ```
 
 ## Полезные команды
@@ -63,13 +63,13 @@ scripts/destroy.sh                                          # снести вс�
 
 ## Обновление образа
 
-Deployment ссылается на `taskflow:1.0` с `imagePullPolicy: Never`. Чтобы выкатить новую версию,
+Deployment ссылается на `taskflow:2.0` с `imagePullPolicy: Never`. Чтобы выкатить новую версию,
 соберите образ с новым тегом, поменяйте тег в `k8s/20-app.yaml` (в init-контейнере `migrate`
 и в основном контейнере) и примените манифест — Kubernetes сделает RollingUpdate:
 
 ```bash
-scripts/build-image.sh taskflow:1.1
-sed -i.bak 's/taskflow:1\.0/taskflow:1.1/g' k8s/20-app.yaml && rm k8s/20-app.yaml.bak
+scripts/build-image.sh taskflow:2.1
+sed -i.bak 's/taskflow:2\.0/taskflow:2.1/g' k8s/20-app.yaml && rm k8s/20-app.yaml.bak
 kubectl apply -f k8s/20-app.yaml
 kubectl rollout status deployment/taskflow -n taskflow
 ```

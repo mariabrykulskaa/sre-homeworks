@@ -26,7 +26,7 @@ spec:
         app.kubernetes.io/part-of: taskflow
     spec:
       securityContext:
-        # В образе `USER node` (uid 1000); Kubernetes дополнительно
+        # В образе `USER 1000`; Kubernetes дополнительно
         # проверяет, что ни один контейнер пода не стартует от root.
         runAsNonRoot: true
         runAsUser: 1000
@@ -82,9 +82,9 @@ spec:
         #    RollingUpdate, когда старые реплики ещё обслуживают трафик, —
         #    поэтому миграции должны быть обратно совместимыми (expand/contract).
         - name: migrate
-          image: taskflow:1.0
+          image: taskflow:2.0
           imagePullPolicy: Never
-          command: ["node", "src/migrate.js"]
+          command: ["python", "-m", "taskflow.migrate"]
           env: &app-env
             - name: DB_HOST
               valueFrom:
@@ -125,7 +125,7 @@ spec:
           securityContext: *restricted
       containers:
         - name: taskflow
-          image: taskflow:1.0
+          image: taskflow:2.0
           # Never: образ собран локально и загружен в minikube; в реестр
           # за ним ходить не нужно (и нельзя — его там нет).
           imagePullPolicy: Never
@@ -134,7 +134,7 @@ spec:
               containerPort: 3000
           env: *app-env
           envFrom:
-            # PORT, NODE_ENV, RATE_LIMIT_PER_MINUTE
+            # PORT, APP_ENV, RATE_LIMIT_PER_MINUTE
             - configMapRef:
                 name: taskflow-config
           # Liveness: процесс жив (без похода в БД — чтобы при сбое базы

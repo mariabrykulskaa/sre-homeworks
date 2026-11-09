@@ -1,0 +1,320 @@
+# Юнит-тесты правил SLO: vmalert-tool прогоняет rules на синтетических рядах
+# (шаг 1m) и сверяет записанные ряды и алерты. Запуск: scripts/test-rules.sh.
+#
+# Нотация значений: 'a+bxN' — a, a+b, …, a+N·b (N+1 точек); 'axN' — N+1 раз a;
+# '_xN' — N пропусков (ряда нет). Во всех тестах 31 точка: t = 0…30 мин.
+# Обычный фон — 100 запросов к API и 24 запуска проб в минуту.
+#
+# В vmalert-tool группы оцениваются по очереди и сразу видят записи друг
+# друга; в кластере каждая следующая ступень отстаёт на минуту (см. правила).
+# Встроенное хранилище vmalert-tool хранит значения с округлением (~6 значащих
+# цифр), поэтому дробные результаты сравниваются через round(…, 0.0001).
+rule_files:
+  - ../slo-rules.yaml
+evaluation_interval: 1m
+
+tests:
+  # ---------------------------------------------------------------- норма
+  - name: норма — плохих событий нет, бюджеты целы, алертов нет
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/projects",method="GET",status_code="200"}'
+        values: '0+100x30'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/projects",method="GET",status_code="200",le="0.25"}'
+        values: '0+100x30'
+      # Пробы kubelet и статика в SLI не входят, сколько бы их ни было.
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/ready",method="GET",status_code="503"}'
+        values: '0+50x30'
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="static",method="GET",status_code="200"}'
+        values: '0+70x30'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="list_projects",result="success"}'
+        values: '0+24x30'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="list_projects",result="failure"}'
+        values: '0x30'
+      - series: 'pg_up{job="postgres"}'
+        values: '1x30'
+    metricsql_expr_test:
+      - expr: slo:events_total:increase1m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'slo:events_total:increase1m{slo="availability"}'
+            value: 100
+          - labels: 'slo:events_total:increase1m{slo="latency"}'
+            value: 100
+          - labels: 'slo:events_total:increase1m{slo="probes"}'
+            value: 24
+      - expr: slo:events_bad:increase1m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'slo:events_bad:increase1m{slo="availability"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="latency"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="probes"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="database"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="service"}'
+            value: 0
+      - expr: slo:minute_bad
+        eval_time: 10m
+        exp_samples:
+          - labels: 'slo:minute_bad{sli="availability"}'
+            value: 0
+          - labels: 'slo:minute_bad{sli="latency"}'
+            value: 0
+          - labels: 'slo:minute_bad{sli="probes"}'
+            value: 0
+          - labels: 'slo:minute_bad{sli="database"}'
+            value: 0
+      - expr: slo:error_budget_remaining:ratio
+        eval_time: 30m
+        exp_samples:
+          - labels: 'slo:error_budget_remaining:ratio{slo="availability"}'
+            value: 1
+          - labels: 'slo:error_budget_remaining:ratio{slo="latency"}'
+            value: 1
+          - labels: 'slo:error_budget_remaining:ratio{slo="probes"}'
+            value: 1
+          - labels: 'slo:error_budget_remaining:ratio{slo="database"}'
+            value: 1
+          - labels: 'slo:error_budget_remaining:ratio{slo="service"}'
+            value: 1
+    alert_rule_test:
+      - { eval_time: 30m, alertname: SLOErrorBudgetFastBurn, exp_alerts: [] }
+      - { eval_time: 30m, alertname: SLOErrorBudgetSlowBurn, exp_alerts: [] }
+      - { eval_time: 30m, alertname: SLOErrorBudgetExhausted, exp_alerts: [] }
+      - { eval_time: 30m, alertname: SLABreached, exp_alerts: [] }
+
+  # ---------------------------------------------------------------- 5 % ошибок
+  # Минуты 11–20: 5 из 100 запросов — 500 (ряд со статусом 500 появляется с
+  # первой ошибкой, как в prometheus_client), 7 из 24 проб падают.
+  - name: ошибки 5 % — минуты плохие, RB-бюджет за короткую историю исчерпан
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/projects",method="GET",status_code="200"}'
+        values: '0+100x10 1095+95x9 2050+100x9'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/projects",method="GET",status_code="200",le="0.25"}'
+        values: '0+100x10 1095+95x9 2050+100x9'
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/tasks/:id",method="PUT",status_code="500"}'
+        values: '_x11 5+5x9 50x9'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/tasks/:id",method="PUT",status_code="500",le="0.25"}'
+        values: '_x11 5+5x9 50x9'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="success"}'
+        values: '0+24x10 257+17x9 434+24x9'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="failure"}'
+        values: '0x10 7+7x9 70x9'
+      - series: 'pg_up{job="postgres"}'
+        values: '1x30'
+    metricsql_expr_test:
+      - expr: slo:events_bad:increase1m
+        eval_time: 11m
+        exp_samples:
+          # Первая же точка нового ряда 5xx засчитана как прирост от нуля.
+          - labels: 'slo:events_bad:increase1m{slo="availability"}'
+            value: 5
+          - labels: 'slo:events_bad:increase1m{slo="latency"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="probes"}'
+            value: 7
+          - labels: 'slo:events_bad:increase1m{slo="database"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="service"}'
+            value: 1
+      - expr: slo:minute_bad
+        eval_time: 15m
+        exp_samples:
+          - labels: 'slo:minute_bad{sli="availability"}'
+            value: 1
+          - labels: 'slo:minute_bad{sli="latency"}'
+            value: 0
+          - labels: 'slo:minute_bad{sli="probes"}'
+            value: 1
+          - labels: 'slo:minute_bad{sli="database"}'
+            value: 0
+      - expr: slo:events_bad:increase1m{slo=~"availability|service"}
+        eval_time: 21m
+        exp_samples:
+          - labels: 'slo:events_bad:increase1m{slo="availability"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="service"}'
+            value: 0
+      # RB: 50 ошибок из 3000 запросов, 70 неуспешных проб из 720.
+      # TB: 10 плохих минут из 30 в окне 30m и из 43 200 в окне 30d.
+      - expr: round(slo:error_ratio:30m, 0.0001)
+        eval_time: 30m
+        exp_samples:
+          - labels: 'slo:error_ratio:30m{slo="availability"}'
+            value: 0.0167
+          - labels: 'slo:error_ratio:30m{slo="latency"}'
+            value: 0
+          - labels: 'slo:error_ratio:30m{slo="probes"}'
+            value: 0.0972
+          - labels: 'slo:error_ratio:30m{slo="database"}'
+            value: 0
+          - labels: 'slo:error_ratio:30m{slo="service"}'
+            value: 0.3333
+      # Бюджет RBSLO считается от уже случившихся запросов: за 30 минут истории
+      # 1,7 % ошибок при допустимых 0,5 % — бюджет перерасходован в 3,3 раза.
+      # Бюджет TBSLO — от длины окна: 10 из 216 допустимых плохих минут за 30 дней.
+      - expr: round(slo:error_budget_remaining:ratio{slo=~"availability|service"}, 0.0001)
+        eval_time: 30m
+        exp_samples:
+          - labels: 'slo:error_budget_remaining:ratio{slo="availability"}'
+            value: -2.3333
+          - labels: 'slo:error_budget_remaining:ratio{slo="service"}'
+            value: 0.9537
+    alert_rule_test:
+      # 20m: окно 1h — 10 плохих минут из 60 (burn 33,3), 5m — все плохие.
+      # Пробы: 70 из 480 запусков за 20 минут — 14,6 % при допустимых 0,5 %.
+      - eval_time: 20m
+        alertname: SLOErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels: { slo: probes, severity: critical }
+            exp_annotations:
+              summary: 'SLO probes: бюджет ошибок сгорает в 29.2 раза быстрее допустимого (окно 1h)'
+              description: При такой скорости месячный бюджет закончится примерно за двое суток или быстрее.
+          - exp_labels: { slo: service, severity: critical }
+            exp_annotations:
+              summary: 'SLO service: бюджет ошибок сгорает в 33.3 раза быстрее допустимого (окно 1h)'
+              description: При такой скорости месячный бюджет закончится примерно за двое суток или быстрее.
+      # Через 10 минут после устранения короткое окно 5m чистое — алерт снят.
+      - { eval_time: 30m, alertname: SLOErrorBudgetFastBurn, exp_alerts: [] }
+      - { eval_time: 30m, alertname: SLABreached, exp_alerts: [] }
+
+  # ---------------------------------------------------------------- задержка
+  # Минуты 11–20: из 100 запросов быстрее 250 мс только 10. Ошибок нет.
+  - name: задержка — плохой latency, availability не задета
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/tasks",method="POST",status_code="201"}'
+        values: '0+100x30'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/tasks",method="POST",status_code="201",le="0.25"}'
+        values: '0+100x10 1010+10x9 1200+100x9'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="success"}'
+        values: '0+24x30'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="failure"}'
+        values: '0x30'
+      - series: 'pg_up{job="postgres"}'
+        values: '1x30'
+    metricsql_expr_test:
+      - expr: slo:events_bad:increase1m{slo=~"availability|latency|service"}
+        eval_time: 15m
+        exp_samples:
+          - labels: 'slo:events_bad:increase1m{slo="availability"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="latency"}'
+            value: 90
+          - labels: 'slo:events_bad:increase1m{slo="service"}'
+            value: 1
+      - expr: slo:minute_bad{sli=~"availability|latency"}
+        eval_time: 15m
+        exp_samples:
+          - labels: 'slo:minute_bad{sli="availability"}'
+            value: 0
+          - labels: 'slo:minute_bad{sli="latency"}'
+            value: 1
+      - expr: round(slo:error_ratio:30m{slo=~"availability|latency|service"}, 0.0001)
+        eval_time: 30m
+        exp_samples:
+          - labels: 'slo:error_ratio:30m{slo="availability"}'
+            value: 0
+          - labels: 'slo:error_ratio:30m{slo="latency"}'
+            value: 0.3
+          - labels: 'slo:error_ratio:30m{slo="service"}'
+            value: 0.3333
+
+  # ---------------------------------------------------------------- отказ БД
+  # Минуты 11–20: пода db нет — ряда pg_up нет вовсе, реплики TaskFlow не
+  # готовы и запросов не получают, все пробы падают (соединение отклонено).
+  - name: отказ БД — минуты без данных о БД плохие, запросов к API нет вовсе
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/projects",method="GET",status_code="200"}'
+        values: '0+100x10 1000x9 1100+100x9'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/projects",method="GET",status_code="200",le="0.25"}'
+        values: '0+100x10 1000x9 1100+100x9'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="success"}'
+        values: '0+24x10 240x9 264+24x9'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="failure"}'
+        values: '0x10 24+24x9 240x9'
+      - series: 'pg_up{job="postgres"}'
+        values: '1x10 _x10 1x9'
+    metricsql_expr_test:
+      - expr: slo:events_bad:increase1m{slo=~"database|service|availability"}
+        eval_time: 15m
+        exp_samples:
+          # Запросов нет — нет и ошибок: серверные метрики сбоя не видят.
+          - labels: 'slo:events_bad:increase1m{slo="availability"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="database"}'
+            value: 1
+          - labels: 'slo:events_bad:increase1m{slo="service"}'
+            value: 1
+      - expr: slo:events_total:increase1m{slo="availability"}
+        eval_time: 15m
+        exp_samples:
+          - labels: 'slo:events_total:increase1m{slo="availability"}'
+            value: 0
+      - expr: slo:events_bad:increase1m{slo=~"database|service"}
+        eval_time: 25m
+        exp_samples:
+          - labels: 'slo:events_bad:increase1m{slo="database"}'
+            value: 0
+          - labels: 'slo:events_bad:increase1m{slo="service"}'
+            value: 0
+      # 10 плохих минут из 43 200: доступность 99,977 %, бюджет базы (43,2 минуты) — 76,85 %.
+      - expr: round(slo:error_budget_remaining:ratio{slo=~"database|service"}, 0.0001)
+        eval_time: 30m
+        exp_samples:
+          - labels: 'slo:error_budget_remaining:ratio{slo="database"}'
+            value: 0.7685
+          - labels: 'slo:error_budget_remaining:ratio{slo="service"}'
+            value: 0.9537
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SLOErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels: { slo: database, severity: critical }
+            exp_annotations:
+              summary: 'SLO database: бюджет ошибок сгорает в 166.7 раза быстрее допустимого (окно 1h)'
+              description: При такой скорости месячный бюджет закончится примерно за двое суток или быстрее.
+          - exp_labels: { slo: probes, severity: critical }
+            exp_annotations:
+              summary: 'SLO probes: бюджет ошибок сгорает в 100.0 раза быстрее допустимого (окно 1h)'
+              description: При такой скорости месячный бюджет закончится примерно за двое суток или быстрее.
+          - exp_labels: { slo: service, severity: critical }
+            exp_annotations:
+              summary: 'SLO service: бюджет ошибок сгорает в 33.3 раза быстрее допустимого (окно 1h)'
+              description: При такой скорости месячный бюджет закончится примерно за двое суток или быстрее.
+      # Окно 6h: у базы 10 из 360 минут — burn 27,8 > 6; у service — 5,6 < 6.
+      - eval_time: 20m
+        alertname: SLOErrorBudgetSlowBurn
+        exp_alerts:
+          - exp_labels: { slo: database, severity: warning }
+            exp_annotations:
+              summary: 'SLO database: бюджет ошибок сгорает в 27.8 раза быстрее допустимого (окно 6h)'
+              description: При такой скорости месячный бюджет закончится меньше чем за пять дней.
+          - exp_labels: { slo: probes, severity: warning }
+            exp_annotations:
+              summary: 'SLO probes: бюджет ошибок сгорает в 100.0 раза быстрее допустимого (окно 6h)'
+              description: При такой скорости месячный бюджет закончится меньше чем за пять дней.
+      - { eval_time: 30m, alertname: SLOErrorBudgetFastBurn, exp_alerts: [] }
+
+  - name: пробер молчит — SLI probes не считается, алерт SLOProberDown
+    interval: 1m
+    input_series:
+      - series: 'prober_probe_runs_total{job="taskflow-prober", probe="list_projects", result="success"}'
+        values: '0+12x10 _x20'
+      - series: 'pg_up{job="postgres"}'
+        values: '1x30'
+    alert_rule_test:
+      # Последняя точка — на 10-й минуте: в окне 5m она есть до 15-й.
+      - { eval_time: 13m, alertname: SLOProberDown, exp_alerts: [] }
+      - eval_time: 17m
+        alertname: SLOProberDown
+        exp_alerts:
+          - exp_labels: { job: taskflow-prober, slo: probes, severity: warning }
+            exp_annotations:
+              summary: 'Пробер TaskFlow 5 минут не присылает метрики — SLI probes не считается'
+              description: Отказ, который не видят серверные метрики, сейчас не попадёт ни в SLO, ни в SLA.

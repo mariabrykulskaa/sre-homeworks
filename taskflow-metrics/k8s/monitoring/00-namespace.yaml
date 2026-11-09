@@ -1,0 +1,14 @@
+# Отдельное пространство имён для системы мониторинга: VictoriaMetrics и
+# vmagent обновляются и удаляются независимо от приложения.
+#
+# Создаётся манифестом, а не флагом `helm install --create-namespace`, чтобы
+# повесить метки Pod Security Admission: поды мониторинга обязаны работать
+# в профиле restricted, как и приложение (securityContext — в values-файлах).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: monitoring
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

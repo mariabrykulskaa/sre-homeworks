@@ -8,7 +8,7 @@ JSON-логи. Запросы LogsQL со скриншотами и объясн
 
 ```
 k8s/
-  app/                   манифесты приложения из ДЗ №2 (образ taskflow:1.1 с JSON-логами, LOG_LEVEL)
+  app/                   манифесты приложения из ДЗ №2 (образ taskflow:2.0 с JSON-логами, LOG_LEVEL)
   logging/
     00-namespace.yaml    Namespace logging (PSA privileged — шипперу нужны hostPath и root)
     10-victoria-logs.yaml PVC + Deployment + Service Victoria Logs (порт 9428, vmui на /select/vmui/)
@@ -33,9 +33,9 @@ screenshots/             скриншоты vmui для отчёта
 app/                     (в архиве) исходники приложения с Dockerfile
 ```
 
-Исходники приложения — в соседнем каталоге `../homework1` (одна кодовая база для всех заданий).
-Для этого задания в них добавлен логгер `src/lib/logger.js` и middleware
-`src/middleware/request-context.js`; скрипты сами находят `app/Dockerfile` в распакованном архиве
+Исходники приложения (Python) — в соседнем каталоге `../app` (одна кодовая база для всех заданий).
+Логи пишут модули `taskflow/logger.py` (JSON-логгер) и `taskflow/middleware.py`
+(request_id и access-лог); скрипты сами находят `app/Dockerfile` в распакованном архиве
 (переопределить — переменной `APP_DIR`).
 
 ## Быстрый старт
@@ -43,7 +43,7 @@ app/                     (в архиве) исходники приложени
 ```bash
 minikube start --driver=docker --container-runtime=docker
 
-scripts/build-image.sh            # taskflow:1.1 внутри minikube
+scripts/build-image.sh            # taskflow:2.0 внутри minikube
 scripts/deploy.sh                 # приложение + Victoria Logs + Vector, ждёт готовности
 
 scripts/port-forward.sh           # в отдельном терминале; vmui: http://127.0.0.1:9428/select/vmui/
@@ -61,9 +61,9 @@ scripts/run-queries.sh 30         # те же запросы, что в отчё
 | `timestamp` | `2026-10-16T16:12:20.563Z` | RFC 3339, UTC |
 | `level` | `info` / `warn` / `error` / `debug` | порог — `LOG_LEVEL` |
 | `message` | `request`, `unhandled error` | неизменная формулировка события |
-| `service.name` | `taskflow` | `SERVICE_NAME` или `name` из package.json |
-| `service.version` | `1.1.0` | `version` из package.json |
-| `deployment.environment` | `production` | `NODE_ENV` |
+| `service.name` | `taskflow` | `SERVICE_NAME`, по умолчанию `taskflow` |
+| `service.version` | `2.0.0` | `taskflow.__version__` |
+| `deployment.environment` | `production` | `APP_ENV` |
 
 Контекст события — плоскими полями: у access-лога `request_id`, `method`, `path` (без строки
 запроса), `query` (строка запроса после `?`, до 512 символов; поля нет, если её не было), `status`,

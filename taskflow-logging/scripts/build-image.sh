@@ -2,7 +2,7 @@
 # Собирает образ приложения docker-демоном внутри minikube.
 # После этого образ сразу виден kubelet'у — отдельная загрузка не нужна.
 #
-# Использование: scripts/build-image.sh [тег]   (по умолчанию taskflow:1.1)
+# Использование: scripts/build-image.sh [тег]   (по умолчанию taskflow:2.0)
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"

@@ -2,3 +2,10 @@ node_modules/
 .env
 .DS_Store
 *.log
+# журналы демонстраций — часть отчётов
+!**/screenshots/*.log
+!**/screencast/*.log
+__pycache__/
+.pytest_cache/
+.venv/
+*.zip

@@ -2,15 +2,15 @@
 # shellcheck disable=SC2034  # переменные используются в скриптах, которые подключают этот файл
 #
 # Исходники приложения: в распакованном архиве они лежат в ./app,
-# в рабочем репозитории — в ../homework1 (одна кодовая база, см. README).
+# в репозитории — в ../app (одна кодовая база для всех ДЗ).
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NS=taskflow
-IMAGE_DEFAULT=taskflow:1.0
+IMAGE_DEFAULT=taskflow:2.0
 
 if [[ -z "${APP_DIR:-}" ]]; then
   if [[ -f "$ROOT/app/Dockerfile" ]]; then
     APP_DIR="$ROOT/app"
   else
-    APP_DIR="$ROOT/../homework1"
+    APP_DIR="$ROOT/../app"
   fi
 fi

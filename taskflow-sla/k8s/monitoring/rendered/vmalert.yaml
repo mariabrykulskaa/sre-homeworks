@@ -1,0 +1,142 @@
+---
+# Source: victoria-metrics-alert/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vmalert-victoria-metrics-alert
+  namespace: monitoring
+  labels: 
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: victoria-metrics-alert-0.51.0
+---
+# Source: victoria-metrics-alert/templates/alert-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: monitoring
+  labels: 
+    app.kubernetes.io/component: server
+    app.kubernetes.io/instance: vmalert
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: victoria-metrics-alert
+    app.kubernetes.io/version: v1.154.0
+    helm.sh/chart: victoria-metrics-alert-0.51.0
+  name: vmalert
+spec:
+  clusterIP: None
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8880
+      targetPort: http
+      protocol: TCP
+  selector: 
+    app: server
+    app.kubernetes.io/instance: vmalert
+    app.kubernetes.io/name: victoria-metrics-alert
+
+---
+# Source: victoria-metrics-alert/templates/alert-server.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert
+  namespace: monitoring
+  labels: 
+    app.kubernetes.io/component: server
+    app.kubernetes.io/instance: vmalert
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: victoria-metrics-alert
+    app.kubernetes.io/version: v1.154.0
+    helm.sh/chart: victoria-metrics-alert-0.51.0
+spec:
+  minReadySeconds: 0
+  replicas: 1
+  selector:
+    matchLabels: 
+      app: server
+      app.kubernetes.io/instance: vmalert
+      app.kubernetes.io/name: victoria-metrics-alert
+  strategy: 
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels: 
+        app: server
+        app.kubernetes.io/component: server
+        app.kubernetes.io/instance: vmalert
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: victoria-metrics-alert
+      annotations: 
+        checksum/config: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8880"
+        prometheus.io/scrape: "true"
+    spec:
+      serviceAccountName: vmalert-victoria-metrics-alert
+      automountServiceAccountToken: false
+      securityContext: 
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vmalert
+          securityContext: 
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          image: victoriametrics/vmalert:v1.154.0
+          args: 
+            - --configCheckInterval=30s
+            - --datasource.url=http://vm-single-victoria-metrics-single-server.monitoring.svc:8428
+            - --disableAlertgroupLabel
+            - --envflag.enable
+            - --envflag.prefix=VM_
+            - --external.url=http://127.0.0.1:8880
+            - --httpListenAddr=:8880
+            - --loggerFormat=json
+            - --notifier.blackhole
+            - --remoteRead.url=http://vm-single-victoria-metrics-single-server.monitoring.svc:8428
+            - --remoteWrite.url=http://vm-single-victoria-metrics-single-server.monitoring.svc:8428
+            - --rule=/config/*.yaml
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8880
+          readinessProbe: 
+            failureThreshold: 3
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe: 
+            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            tcpSocket:
+              port: http
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: rules-out
+              mountPath: /config
+            
+          resources: 
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 20m
+              memory: 48Mi
+      volumes:
+        - name: rules-out
+          configMap:
+            name: vmalert-slo-rules

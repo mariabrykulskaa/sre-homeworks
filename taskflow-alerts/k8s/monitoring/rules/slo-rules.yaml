@@ -1,0 +1,221 @@
+# Правила SLO TaskFlow для vmalert (ДЗ №5). Формулы и обоснование — Отчёт.md, разделы 3–6.
+#
+# Конвейер, каждая группа — раз в минуту:
+#   1. taskflow-slo-objectives  цели SLO и SLA — константы; единственное место, где они заданы:
+#                               дашборд и алерты берут их отсюда
+#   2. taskflow-slo-events      SLI по минутам из сырых метрик: сколько событий было и сколько
+#                               из них плохих (RBSLO — запросы и пробы, TBSLO — минуты)
+#   3. taskflow-slo-windows     доля плохих событий в окнах 5m…30d — из рядов группы 2
+#   4. taskflow-slo-alerts      остаток бюджета ошибок и алерты по скорости его расходования
+#
+# Группа читает то, что записали предыдущие, с задержкой в одну оценку: vmalert
+# запрашивает данные на -rule.evalDelay (30 с) раньше текущего момента, а
+# VictoriaMetrics не отдаёт точки моложе -search.latencyOffset. Поэтому каждая
+# ступень опирается на ряды предыдущей, а не на свои же записи той же оценки.
+#
+# Пользовательские запросы к API — все маршруты /api, кроме проб kubelet
+# (/api/health, /api/ready) и статики интерфейса; unmatched — запросы /api,
+# отклонённые до маршрутизации (404, битый JSON, rate limit), они тоже от клиентов.
+
+groups:
+  - name: taskflow-slo-objectives
+    interval: 1m
+    rules:
+      # slo_type: request — RBSLO (доля успешных операций), time — TBSLO (доля хороших минут).
+      - record: slo:objective:ratio
+        labels: { slo: availability, slo_type: request }
+        expr: vector(0.995)
+      - record: slo:objective:ratio
+        labels: { slo: latency, slo_type: request }
+        expr: vector(0.99)
+      - record: slo:objective:ratio
+        labels: { slo: probes, slo_type: request }
+        expr: vector(0.995)
+      - record: slo:objective:ratio
+        labels: { slo: database, slo_type: time }
+        expr: vector(0.999)
+      - record: slo:objective:ratio
+        labels: { slo: service, slo_type: time }
+        expr: vector(0.995)
+      # SLA — внешнее обязательство по общей доступности сервиса (slo="service"):
+      # мягче внутреннего SLO, чтобы бюджет SLO кончался раньше, чем нарушается договор.
+      - record: sla:objective:ratio
+        labels: { slo: service }
+        expr: vector(0.99)
+
+  - name: taskflow-slo-events
+    interval: 1m
+    rules:
+      # ---- RBSLO availability: ответ API без ошибки сервера (не 5xx).
+      - record: slo:events_total:increase1m
+        labels: { slo: availability }
+        expr: |
+          WITH (api = {job="taskflow", route=~"/api/(projects|tasks).*|unmatched"})
+          sum(increase(http_request_duration_seconds_count{api}[1m]))
+      # Ряды со статусом 5xx появляются только с первой ошибкой: пока их нет — 0 ошибок.
+      - record: slo:events_bad:increase1m
+        labels: { slo: availability }
+        expr: |
+          WITH (api = {job="taskflow", route=~"/api/(projects|tasks).*|unmatched"})
+          sum(increase(http_request_duration_seconds_count{api, status_code=~"5.."}[1m])) or on() vector(0)
+
+      # ---- RBSLO latency: ответ API за 250 мс (граница корзины гистограммы le="0.25").
+      - record: slo:events_total:increase1m
+        labels: { slo: latency }
+        expr: |
+          WITH (api = {job="taskflow", route=~"/api/(projects|tasks).*|unmatched"})
+          sum(increase(http_request_duration_seconds_count{api}[1m]))
+      - record: slo:events_bad:increase1m
+        labels: { slo: latency }
+        expr: |
+          WITH (api = {job="taskflow", route=~"/api/(projects|tasks).*|unmatched"})
+          sum(increase(http_request_duration_seconds_count{api}[1m]))
+            - sum(increase(http_request_duration_seconds_bucket{api, le="0.25"}[1m]))
+
+      # ---- RBSLO probes: успешный запуск пробы пробера (сценарий пользователя снаружи).
+      - record: slo:events_total:increase1m
+        labels: { slo: probes }
+        expr: sum(increase(prober_probe_runs_total{job="taskflow-prober"}[1m]))
+      - record: slo:events_bad:increase1m
+        labels: { slo: probes }
+        expr: sum(increase(prober_probe_runs_total{job="taskflow-prober", result="failure"}[1m]))
+
+      # ---- TBSLO database: минута плохая, если хоть один скрейп показал pg_up = 0
+      # или данных о БД нет вовсе (под db удалён — экспортер в нём же).
+      - record: slo:events_bad:increase1m
+        labels: { slo: database }
+        expr: (min(min_over_time(pg_up{job="postgres"}[1m])) < bool 1) or on() vector(1)
+
+      # ---- Вердикты минуты по каждому SLI — из них складывается общая доступность.
+      # 1 — минута плохая, 0 — хорошая; ряда нет — данных о SLI за минуту нет.
+      - record: slo:minute_bad
+        labels: { sli: probes }
+        expr: |
+          sum(increase(prober_probe_runs_total{job="taskflow-prober", result="failure"}[1m]))
+            / sum(increase(prober_probe_runs_total{job="taskflow-prober"}[1m])) > bool 0.10
+      - record: slo:minute_bad
+        labels: { sli: availability }
+        expr: |
+          WITH (api = {job="taskflow", route=~"/api/(projects|tasks).*|unmatched"})
+          (sum(increase(http_request_duration_seconds_count{api, status_code=~"5.."}[1m])) or on() vector(0))
+            / sum(increase(http_request_duration_seconds_count{api}[1m])) > bool 0.02
+      - record: slo:minute_bad
+        labels: { sli: latency }
+        expr: |
+          WITH (api = {job="taskflow", route=~"/api/(projects|tasks).*|unmatched"})
+          1 - sum(increase(http_request_duration_seconds_bucket{api, le="0.25"}[1m]))
+            / sum(increase(http_request_duration_seconds_count{api}[1m])) > bool 0.05
+      - record: slo:minute_bad
+        labels: { sli: database }
+        expr: (min(min_over_time(pg_up{job="postgres"}[1m])) < bool 1) or on() vector(1)
+
+      # ---- TBSLO service — общая доступность для SLA: минута хорошая, только если
+      # хороши все SLI, по которым за неё есть данные. Те же выражения, что у
+      # slo:minute_bad выше (ряды той же оценки здесь ещё не видны — см. шапку).
+      - record: slo:events_bad:increase1m
+        labels: { slo: service }
+        expr: |
+          WITH (api = {job="taskflow", route=~"/api/(projects|tasks).*|unmatched"})
+          max(union(
+            label_set(
+              sum(increase(prober_probe_runs_total{job="taskflow-prober", result="failure"}[1m]))
+                / sum(increase(prober_probe_runs_total{job="taskflow-prober"}[1m])) > bool 0.10,
+              "sli", "probes"),
+            label_set(
+              (sum(increase(http_request_duration_seconds_count{api, status_code=~"5.."}[1m])) or on() vector(0))
+                / sum(increase(http_request_duration_seconds_count{api}[1m])) > bool 0.02,
+              "sli", "availability"),
+            label_set(
+              1 - sum(increase(http_request_duration_seconds_bucket{api, le="0.25"}[1m]))
+                / sum(increase(http_request_duration_seconds_count{api}[1m])) > bool 0.05,
+              "sli", "latency"),
+            label_set(
+              (min(min_over_time(pg_up{job="postgres"}[1m])) < bool 1) or on() vector(1),
+              "sli", "database"),
+          ))
+
+  # Доля плохих событий в окне. RBSLO — плохие операции / все операции за окно.
+  # TBSLO — плохие минуты / длина окна в минутах: минута без данных считается
+  # хорошей, как в SLA (простой — только зафиксированный). Окна: 5m/30m/1h/6h —
+  # для алертов по скорости расходования бюджета, 30d — окно SLO.
+  - name: taskflow-slo-windows
+    interval: 1m
+    rules:
+      - record: slo:error_ratio:5m
+        expr: |
+          sum_over_time(slo:events_bad:increase1m{slo=~"availability|latency|probes"}[5m])
+            / sum_over_time(slo:events_total:increase1m[5m])
+          or sum_over_time(slo:events_bad:increase1m{slo=~"database|service"}[5m]) / 5
+      - record: slo:error_ratio:30m
+        expr: |
+          sum_over_time(slo:events_bad:increase1m{slo=~"availability|latency|probes"}[30m])
+            / sum_over_time(slo:events_total:increase1m[30m])
+          or sum_over_time(slo:events_bad:increase1m{slo=~"database|service"}[30m]) / 30
+      - record: slo:error_ratio:1h
+        expr: |
+          sum_over_time(slo:events_bad:increase1m{slo=~"availability|latency|probes"}[1h])
+            / sum_over_time(slo:events_total:increase1m[1h])
+          or sum_over_time(slo:events_bad:increase1m{slo=~"database|service"}[1h]) / 60
+      - record: slo:error_ratio:6h
+        expr: |
+          sum_over_time(slo:events_bad:increase1m{slo=~"availability|latency|probes"}[6h])
+            / sum_over_time(slo:events_total:increase1m[6h])
+          or sum_over_time(slo:events_bad:increase1m{slo=~"database|service"}[6h]) / 360
+      - record: slo:error_ratio:30d
+        expr: |
+          sum_over_time(slo:events_bad:increase1m{slo=~"availability|latency|probes"}[30d])
+            / sum_over_time(slo:events_total:increase1m[30d])
+          or sum_over_time(slo:events_bad:increase1m{slo=~"database|service"}[30d]) / 43200
+
+  # Бюджет ошибок окна 30d — допустимая доля плохих событий (1 − цель). Остаток:
+  # 1 — бюджет не тронут, 0 — израсходован, < 0 — SLO нарушен.
+  # Скорость расходования (burn rate) — доля ошибок / (1 − цель): 1 — бюджет
+  # кончится ровно к концу окна. Пороги и пары окон — из SRE Workbook (гл. 5):
+  # 14.4 за 1h — 2 % месячного бюджета за час, 6 за 6h — 5 % за шесть часов;
+  # короткое окно (5m, 30m) гасит алерт сразу после устранения сбоя.
+# Для TBSLO database (99,9 %, бюджет — 43 минуты) одна плохая минута — это
+# 2,3 % месячного бюджета, больше порога «2 % за час»: алерт FastBurn на
+# одну минуту без БД — осознанно, а не ложное срабатывание.
+  - name: taskflow-slo-alerts
+    interval: 1m
+    rules:
+      - record: slo:error_budget_remaining:ratio
+        expr: 1 - slo:error_ratio:30d / on(slo) (1 - slo:objective:ratio)
+
+      - alert: SLOErrorBudgetFastBurn
+        expr: |
+          slo:error_ratio:1h / on(slo) (1 - slo:objective:ratio) > 14.4
+          and slo:error_ratio:5m / on(slo) (1 - slo:objective:ratio) > 14.4
+        labels: { severity: critical }
+        annotations:
+          summary: 'SLO {{ $labels.slo }}: бюджет ошибок сгорает в {{ printf "%.1f" $value }} раза быстрее допустимого (окно 1h)'
+          description: При такой скорости месячный бюджет закончится примерно за двое суток или быстрее.
+      - alert: SLOErrorBudgetSlowBurn
+        expr: |
+          slo:error_ratio:6h / on(slo) (1 - slo:objective:ratio) > 6
+          and slo:error_ratio:30m / on(slo) (1 - slo:objective:ratio) > 6
+        labels: { severity: warning }
+        annotations:
+          summary: 'SLO {{ $labels.slo }}: бюджет ошибок сгорает в {{ printf "%.1f" $value }} раза быстрее допустимого (окно 6h)'
+          description: При такой скорости месячный бюджет закончится меньше чем за пять дней.
+      - alert: SLOErrorBudgetExhausted
+        expr: slo:error_budget_remaining:ratio <= 0
+        labels: { severity: warning }
+        annotations:
+          summary: 'SLO {{ $labels.slo }} нарушен: бюджет ошибок за 30 дней израсходован'
+          description: Изменения, которые несут риск, откладываются до восстановления бюджета.
+      # Без пробера SLI probes пропадает, и минуты общей доступности судятся
+      # только по серверным метрикам: отказ, при котором запросы не доходят до
+      # приложения, при живой БД выглядел бы хорошими минутами. Метамониторинг.
+      - alert: SLOProberDown
+        expr: absent_over_time(prober_probe_runs_total{job="taskflow-prober"}[5m])
+        labels: { severity: warning, slo: probes }
+        annotations:
+          summary: 'Пробер TaskFlow 5 минут не присылает метрики — SLI probes не считается'
+          description: Отказ, который не видят серверные метрики, сейчас не попадёт ни в SLO, ни в SLA.
+      - alert: SLABreached
+        expr: 1 - slo:error_ratio:30d{slo="service"} < on(slo) sla:objective:ratio
+        labels: { severity: critical }
+        annotations:
+          summary: 'Доступность TaskFlow за 30 дней {{ $value | humanizePercentage }} — ниже SLA'
+          description: Нарушено внешнее обязательство; по SLA клиентам полагается компенсация.

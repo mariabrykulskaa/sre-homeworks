@@ -1,0 +1,7 @@
+# II. Зависимости: все явно объявлены и зафиксированы до версии.
+fastapi==0.115.12
+uvicorn==0.34.2
+psycopg[binary]==3.2.9
+psycopg-pool==3.2.6
+prometheus-client==0.22.1
+python-dotenv==1.1.0

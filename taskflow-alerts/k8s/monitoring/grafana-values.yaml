@@ -1,0 +1,97 @@
+# Values для Helm-чарта grafana-community/grafana 14.1.0 (Grafana 13.2.4).
+# Чарт grafana/grafana больше не обновляется — сообщество перенесло его в
+# репозиторий grafana-community (тот же код, те же values).
+# Установка (scripts/deploy.sh):
+#   kubectl create configmap grafana-dashboards-slo --from-file=dashboards/ …
+#   helm upgrade --install grafana grafana-community/grafana --version 14.1.0 \
+#     -n monitoring -f k8s/monitoring/grafana-values.yaml
+#
+# Grafana здесь — только витрина: источник данных и дашборд SLI/SLO/SLA
+# заданы файлами (provisioning) и пересоздаются при каждом старте пода.
+# Хранилище — emptyDir: всё, что важно, лежит в репозитории, а не в Grafana.
+
+fullnameOverride: grafana
+
+# Пароль администратора — из Secret grafana-admin, который создаёт
+# scripts/deploy.sh со случайным паролем (в values и в git его нет).
+admin:
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: admin-password
+
+# Grafana не обращается к API Kubernetes (sidecar'ы выключены).
+rbac:
+  create: false
+serviceAccount:
+  create: false
+automountServiceAccountToken: false
+
+# Тестовый под `helm test` не нужен.
+testFramework:
+  enabled: false
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      # VictoriaMetrics совместима с API Prometheus — встроенного типа
+      # prometheus достаточно, плагин не нужен. uid фиксирован: на него
+      # ссылаются панели дашборда.
+      - name: VictoriaMetrics
+        uid: victoriametrics
+        type: prometheus
+        access: proxy
+        url: http://vm-single-victoria-metrics-single-server.monitoring.svc:8428
+        isDefault: true
+        editable: false
+        jsonData:
+          # Интервал скрейпа vmagent: меньший шаг графиков смысла не имеет.
+          timeInterval: 15s
+          httpMethod: POST
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: slo
+        orgId: 1
+        folder: TaskFlow
+        type: file
+        # Дашборд меняется только через репозиторий: правки в UI не сохраняются.
+        allowUiUpdates: false
+        disableDeletion: true
+        options:
+          path: /var/lib/grafana/dashboards/slo
+
+# ConfigMap с JSON дашборда создаёт scripts/deploy.sh из dashboards/*.json.
+dashboardsConfigMaps:
+  slo: grafana-dashboards-slo
+
+grafana.ini:
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+    check_for_plugin_updates: false
+  # Главная страница после входа — дашборд SLO.
+  dashboards:
+    default_home_dashboard_path: /var/lib/grafana/dashboards/slo/taskflow-slo.json
+  users:
+    default_theme: light
+  security:
+    disable_gravatar: true
+  # Анонимный доступ выключен (как и по умолчанию): вход — admin и пароль из Secret.
+  auth.anonymous:
+    enabled: false
+
+# 512Mi не хватило: при покадровой записи скринкаста (свежая загрузка дашборда
+# из 16 панелей каждые несколько секунд) Grafana падала с OOMKilled.
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+# securityContext и containerSecurityContext по умолчанию в чарте уже
+# соответствуют профилю restricted: uid 472, без root, seccomp RuntimeDefault,
+# drop ALL, корневая ФС только для чтения.

@@ -13,7 +13,7 @@ if [[ -z "$IMAGE" ]]; then
   exit 1
 fi
 images="$(minikube image ls)"   # при остановленном minikube упадёт здесь с его же ошибкой
-# Точное совпадение имени с тегом (а не подстрока: taskflow:1.0 ≠ taskflow:1.0.1).
+# Точное совпадение имени с тегом (а не подстрока: taskflow:2.0 ≠ taskflow:2.0.1).
 if ! grep -qE "(^|/)${IMAGE//./\\.}\$" <<<"$images"; then
   echo "Образ $IMAGE не найден в minikube. Сначала: scripts/build-image.sh $IMAGE" >&2
   exit 1

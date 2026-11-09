@@ -1,0 +1,72 @@
+# Values для Helm-чарта vm/victoria-metrics-alert 0.51.0 (vmalert v1.154.0).
+# Установка (scripts/deploy.sh):
+#   kubectl create configmap vmalert-slo-rules --from-file=rules/ …   (slo-rules.yaml + alerts.yaml)
+#   helm upgrade --install vmalert vm/victoria-metrics-alert --version 0.51.0 \
+#     -n monitoring -f k8s/monitoring/vmalert-values.yaml
+#
+# vmalert считает правила SLO (rules/slo-rules.yaml, ДЗ №5) и алерты сервиса и
+# рантайма (rules/alerts.yaml, ДЗ №6): читает метрики из VictoriaMetrics,
+# записанные ряды (slo:*) и состояние алертов (ALERTS) отправляет туда же по
+# remote write, а сработавшие алерты — в Alertmanager (40-alertmanager.yaml).
+# vmalert не обращается к API Kubernetes — токен ServiceAccount ему не нужен.
+serviceAccount:
+  automountToken: false
+
+server:
+  # Имена Deployment и Service — vmalert (порт 8880), без префиксов чарта.
+  fullnameOverride: vmalert
+
+  datasource:
+    url: http://vm-single-victoria-metrics-single-server.monitoring.svc:8428
+  remoteWrite:
+    url: http://vm-single-victoria-metrics-single-server.monitoring.svc:8428
+  # После перезапуска vmalert восстанавливает состояние алертов из ALERTS_FOR_STATE.
+  remoteRead:
+    url: http://vm-single-victoria-metrics-single-server.monitoring.svc:8428
+
+  # Правила — во внешнем ConfigMap: тот же файл, что проверяют юнит-тесты
+  # (scripts/test-rules.sh), без копирования в values. Чарт монтирует его в /config.
+  configMap: vmalert-slo-rules
+
+  extraArgs:
+    rule:
+      - /config/*.yaml
+    # ConfigMap обновляется в поде без перезапуска (kubelet синхронизирует том
+    # примерно раз в минуту); vmalert перечитывает правила раз в 30 с.
+    configCheckInterval: 30s
+    # Сработавшие алерты — в Alertmanager: он группирует их и рассылает письма.
+    notifier.url: http://alertmanager.monitoring.svc:9093
+    # Без метки alertgroup у записанных рядов: иначе ряды разных групп
+    # (события, окна, бюджет) не сопоставлялись бы в делении по slo.
+    disableAlertgroupLabel: true
+    # Ссылки «source» в UI и в письмах ведут на vmalert через port-forward.
+    external.url: http://127.0.0.1:8880
+
+  # Метрики самого vmalert (vmalert_iteration_*, vmalert_recording_rules_errors_total…)
+  # собираются тем же service discovery, что и остальные.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8880"
+    prometheus.io/path: /metrics
+
+  resources:
+    requests:
+      cpu: 20m
+      memory: 48Mi
+    limits:
+      memory: 256Mi
+
+  # Профиль restricted (namespace monitoring).
+  podSecurityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    enabled: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]

@@ -1,0 +1,38 @@
+# SLA: 99 % минут за 30 дней, то есть не больше 432 минут простоя. Простой
+# 450 минут подряд (7,5 ч без БД) нарушает и SLO, и SLA. Запуск: scripts/test-rules.sh.
+rule_files:
+  - ../slo-rules.yaml
+evaluation_interval: 1m
+
+tests:
+  - name: простой 450 минут — SLO service и SLA нарушены
+    interval: 1m
+    input_series:
+      - series: 'pg_up{job="postgres"}'
+        values: '1x10 _x450 1x10'
+    metricsql_expr_test:
+      # 1 − 450 / 43 200
+      - expr: round(1 - slo:error_ratio:30d{slo="service"}, 0.0001)
+        eval_time: 470m
+        exp_samples:
+          - labels: '{slo="service"}'
+            value: 0.9896
+    alert_rule_test:
+      - eval_time: 470m
+        alertname: SLABreached
+        exp_alerts:
+          - exp_labels: { slo: service, severity: critical }
+            exp_annotations:
+              summary: Доступность TaskFlow за 30 дней 98.96% — ниже SLA
+              description: Нарушено внешнее обязательство; по SLA клиентам полагается компенсация.
+      - eval_time: 470m
+        alertname: SLOErrorBudgetExhausted
+        exp_alerts:
+          - exp_labels: { slo: database, severity: warning }
+            exp_annotations:
+              summary: 'SLO database нарушен: бюджет ошибок за 30 дней израсходован'
+              description: Изменения, которые несут риск, откладываются до восстановления бюджета.
+          - exp_labels: { slo: service, severity: warning }
+            exp_annotations:
+              summary: 'SLO service нарушен: бюджет ошибок за 30 дней израсходован'
+              description: Изменения, которые несут риск, откладываются до восстановления бюджета.

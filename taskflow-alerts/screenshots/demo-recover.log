@@ -1,0 +1,5 @@
+
+[15:31:06] == Снимаем сбои
+deployment.apps/taskflow env updated
+deployment "taskflow" successfully rolled out
+

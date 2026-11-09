@@ -1,5 +1,5 @@
 # Манифесты приложения — те же, что в ДЗ №2, с двумя отличиями:
-#   * образ taskflow:1.1 — приложение с JSON-логами по чек-листу семинара
+#   * образ taskflow:2.0 (Python) — приложение с JSON-логами по чек-листу семинара
 #     (timestamp, level, message, service.name, …) и request_id;
 #   * в ConfigMap добавлен LOG_LEVEL.
 # Шиппер логов ничего от приложения не требует: оно по-прежнему пишет только
@@ -88,11 +88,11 @@ spec:
         #    RollingUpdate, когда старые реплики ещё обслуживают трафик, —
         #    поэтому миграции должны быть обратно совместимыми (expand/contract).
         - name: migrate
-          image: taskflow:1.1
+          image: taskflow:2.0
           imagePullPolicy: Never
-          command: ["node", "src/migrate.js"]
+          command: ["python", "-m", "taskflow.migrate"]
           envFrom:
-            # NODE_ENV и LOG_LEVEL — чтобы логи миграций имели тот же
+            # APP_ENV и LOG_LEVEL — чтобы логи миграций имели тот же
             # deployment.environment и порог, что и у сервера.
             - configMapRef:
                 name: taskflow-config
@@ -136,7 +136,7 @@ spec:
           securityContext: *restricted
       containers:
         - name: taskflow
-          image: taskflow:1.1
+          image: taskflow:2.0
           # Never: образ собран локально и загружен в minikube; в реестр
           # за ним ходить не нужно (и нельзя — его там нет).
           imagePullPolicy: Never
@@ -145,7 +145,7 @@ spec:
               containerPort: 3000
           env: *app-env
           envFrom:
-            # PORT, NODE_ENV, RATE_LIMIT_PER_MINUTE
+            # PORT, APP_ENV, RATE_LIMIT_PER_MINUTE
             - configMapRef:
                 name: taskflow-config
           # Liveness: процесс жив (без похода в БД — чтобы при сбое базы

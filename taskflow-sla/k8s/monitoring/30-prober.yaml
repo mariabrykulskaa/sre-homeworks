@@ -1,0 +1,102 @@
+# Пробер TaskFlow (ДЗ №5): синтетические сценарии пользователя через Service
+# приложения — тем же путём, что запросы клиентов. Исходники — prober/.
+#
+# Живёт в namespace monitoring: это часть системы мониторинга, а не приложения,
+# и сбой в namespace taskflow (вплоть до его удаления) пробер не задевает.
+# Service не нужен: метрики vmagent забирает по IP пода, найдя его по
+# аннотациям prometheus.io/* (как поды TaskFlow, ДЗ №4); job = taskflow-prober
+# из метки app.kubernetes.io/name — по нему ряды выбирают правила SLO.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taskflow-prober-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: taskflow-prober
+    app.kubernetes.io/part-of: monitoring
+data:
+  # Адрес — DNS-имя Service приложения, порт 80, как у клиентов внутри кластера.
+  TARGET_URL: http://taskflow.taskflow.svc.cluster.local
+  # Каждая проба — раз в 5 с: 12 запусков в минуту на пробу, 24 на обе.
+  # Этого хватает, чтобы оценить минуту (порог хорошей минуты — не больше 10 %
+  # неуспешных проб, Отчёт.md, раздел 4) и не нагружать приложение.
+  PROBE_INTERVAL_SECONDS: "5"
+  # Шаг дольше 2 с — для пользователя уже сбой, а не медленный ответ.
+  REQUEST_TIMEOUT_MS: "2000"
+  METRICS_PORT: "9464"
+  LOG_LEVEL: info
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskflow-prober
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: taskflow-prober
+    app.kubernetes.io/part-of: monitoring
+spec:
+  # Одна реплика: две удвоили бы нагрузку и число проб, не добавив сведений
+  # (обе ходят тем же путём). На время перекатки их две — суммы это переживают.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taskflow-prober
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taskflow-prober
+        app.kubernetes.io/part-of: monitoring
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: /metrics
+    spec:
+      # Пробер не обращается к API Kubernetes — токен ServiceAccount ему не нужен.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # По SIGTERM пробер доводит текущие запуски до конца и убирает за собой
+      # (не дольше 20 с, см. prober/__main__.py) — запас до SIGKILL.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: prober
+          image: taskflow-prober:2.0
+          # Образ собран в docker-демоне minikube (scripts/build-image.sh).
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef:
+                name: taskflow-prober-config
+          ports:
+            - name: metrics
+              containerPort: 9464
+          # Проба — сам /metrics: отвечает, значит процесс жив (сервер метрик —
+          # отдельный поток; застрявший цикл проб виден по тому, что
+          # prober_probe_runs_total перестаёт расти). Готовность ни на что не влияет
+          # (Service нет), но показывает в kubectl, что под поднялся.
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 20
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

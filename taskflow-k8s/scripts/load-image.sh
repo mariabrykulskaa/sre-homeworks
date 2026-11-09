@@ -2,7 +2,7 @@
 # Альтернатива build-image.sh: собрать образ обычным docker-демоном хоста
 # и загрузить его в minikube командой `minikube image load`.
 #
-# Использование: scripts/load-image.sh [тег]   (по умолчанию taskflow:1.0)
+# Использование: scripts/load-image.sh [тег]   (по умолчанию taskflow:2.0)
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"

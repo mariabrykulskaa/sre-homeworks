@@ -1,0 +1,54 @@
+# Values для Helm-чарта vm/victoria-metrics-single 0.49.0 (VictoriaMetrics v1.154.0).
+# Установка (scripts/deploy.sh):
+#   helm repo add vm https://victoriametrics.github.io/helm-charts/
+#   helm upgrade --install vm-single vm/victoria-metrics-single --version 0.49.0 \
+#     -n monitoring -f k8s/monitoring/vmsingle-values.yaml
+#
+# VictoriaMetrics single-node — только хранилище (TSDB) и API запросов
+# (/api/v1/query, vmui на /vmui/). Сбор метрик вынесен в vmagent
+# (vmagent-values.yaml), который пишет в это хранилище по remote write.
+# Имя Service при релизе vm-single: vm-single-victoria-metrics-single-server:8428.
+server:
+  # Скрейп внутри VictoriaMetrics выключен (в чарте он и так false): всё
+  # собирает vmagent, иначе одни и те же цели скрейпились бы дважды.
+  scrape:
+    enabled: false
+
+  # Хранить метрики 14 дней (без единицы измерения значение — в месяцах).
+  retentionPeriod: 14d
+
+  persistentVolume:
+    enabled: true
+    # Для учебного кластера хватит с запасом: несколько тысяч рядов
+    # с шагом 15 с занимают десятки мегабайт за две недели.
+    size: 4Gi
+
+  # Собственные метрики VictoriaMetrics собираются тем же service discovery,
+  # что и метрики приложения.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8428"
+    prometheus.io/path: /metrics
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+  # Профиль restricted (namespace monitoring): non-root, seccomp, без capabilities.
+  podSecurityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    enabled: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]

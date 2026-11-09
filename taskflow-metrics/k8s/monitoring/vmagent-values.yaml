@@ -1,0 +1,102 @@
+# Values для Helm-чарта vm/victoria-metrics-agent 0.50.0 (vmagent v1.154.0).
+# Установка (scripts/deploy.sh):
+#   helm upgrade --install vm-agent vm/victoria-metrics-agent --version 0.50.0 \
+#     -n monitoring -f k8s/monitoring/vmagent-values.yaml
+#
+# vmagent — сборщик: находит цели через API Kubernetes (service discovery),
+# скрейпит их по pull-модели и отправляет ряды в VictoriaMetrics по remote
+# write. Если хранилище недоступно, копит данные в очереди на диске
+# (/tmpData, emptyDir пода) и дошлёт позже; пересоздание пода очередь теряет.
+
+# Имя объектов (Deployment, Service) — как в командах проверки из задания:
+#   kubectl port-forward svc/vm-single-victoria-metrics-agent -n monitoring 8429:8429
+fullnameOverride: vm-single-victoria-metrics-agent
+
+remoteWrite:
+  - url: http://vm-single-victoria-metrics-single-server.monitoring.svc:8428/api/v1/write
+
+# В чарте Service выключен по умолчанию; нужен для port-forward к /targets и /metrics.
+service:
+  enabled: true
+
+# vmagent сам себя тоже скрейпит через service discovery: его метрики
+# (vm_promscrape_*, vmagent_remotewrite_*) показывают здоровье сбора.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8429"
+  prometheus.io/path: /metrics
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# Профиль restricted (namespace monitoring).
+podSecurityContext:
+  enabled: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  enabled: true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+config:
+  global:
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Одна задача на все поды кластера: что и как скрейпить, решают аннотации
+  # пода, а не конфигурация vmagent. Новое приложение подключается к
+  # мониторингу аннотациями в своём Deployment, без правки этого файла:
+  #   prometheus.io/scrape: "true"   — собирать метрики пода;
+  #   prometheus.io/port:   "9464"   — порт (должен быть объявлен в ports контейнера);
+  #   prometheus.io/path:   /metrics — путь (по умолчанию /metrics).
+  scrape_configs:
+    - job_name: kubernetes-pods
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        # 1. Только поды, которые сами попросили их скрейпить.
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: "true"
+        # 2. Завершившиеся поды (Job, CronJob) метрик уже не отдают.
+        - source_labels: [__meta_kubernetes_pod_phase]
+          action: drop
+          regex: Succeeded|Failed
+        # 3. role: pod даёт по цели на каждый порт каждого контейнера, включая
+        #    init-контейнеры. Оставляем одну: контейнер и порт из prometheus.io/port
+        #    (keep_if_equal — расширение relabeling в VictoriaMetrics).
+        - source_labels: [__meta_kubernetes_pod_container_init]
+          action: drop
+          regex: "true"
+        - source_labels:
+            [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_container_port_number]
+          action: keep_if_equal
+        # 4. Путь из prometheus.io/path; без аннотации остаётся /metrics.
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          regex: (.+)
+          target_label: __metrics_path__
+        # 5. Метки, по которым ряды потом ищут и группируют.
+        #    job — имя приложения из метки app.kubernetes.io/name (taskflow,
+        #    postgres, …); у пода без этой метки остаётся kubernetes-pods.
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          regex: (.+)
+          target_label: job
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_container_name]
+          target_label: container
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          target_label: node

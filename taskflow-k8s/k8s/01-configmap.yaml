@@ -11,7 +11,7 @@ metadata:
 data:
   # Приложение
   PORT: "3000"
-  NODE_ENV: production
+  APP_ENV: production
   RATE_LIMIT_PER_MINUTE: "600"
   # База данных: имя Service PostgreSQL (DNS внутри кластера) и порт
   DB_HOST: db

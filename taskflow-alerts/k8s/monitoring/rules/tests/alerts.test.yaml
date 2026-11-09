@@ -1,0 +1,172 @@
+# Юнит-тесты алертов ДЗ №6 (rules/alerts.yaml): vmalert-tool прогоняет правила на
+# синтетических рядах и сверяет, какие алерты горят. Запуск: scripts/test-rules.sh.
+#
+# Нотация значений: 'a+bxN' — a, a+b, …, a+N·b (N+1 точек); 'axN' — N+1 раз a;
+# '_xN' — N пропусков (ряда нет). Шаг — 1 минута, 31 точка: t = 0…30 мин.
+# Фон: 100 запросов к API и 24 запуска проб в минуту, БД доступна, процесс
+# занимает 70 MiB и не перезапускается.
+rule_files:
+  - ../alerts.yaml
+evaluation_interval: 1m
+
+tests:
+  # ---------------------------------------------------------------- норма
+  - name: норма — ни один алерт не горит
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/projects",method="GET",status_code="200"}'
+        values: '0+100x30'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/projects",method="GET",status_code="200",le="0.25"}'
+        values: '0+100x30'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/projects",method="GET",status_code="200",le="+Inf"}'
+        values: '0+100x30'
+      # Пробы kubelet в алерт ошибок не входят, сколько бы 503 они ни давали.
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/ready",method="GET",status_code="503"}'
+        values: '0+50x30'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="list_projects",result="success"}'
+        values: '0+24x30'
+      - series: 'pg_up{job="postgres"}'
+        values: '1x30'
+      - series: 'up{job="taskflow",pod="taskflow-a"}'
+        values: '1x30'
+      - series: 'process_resident_memory_bytes{job="taskflow",pod="taskflow-a"}'
+        values: '73400320x30'
+      - series: 'process_start_time_seconds{job="taskflow",pod="taskflow-a"}'
+        values: '1700000000x30'
+    alert_rule_test:
+      - { eval_time: 30m, alertname: TaskflowHighErrorRate, exp_alerts: [] }
+      - { eval_time: 30m, alertname: TaskflowHighLatency, exp_alerts: [] }
+      - { eval_time: 30m, alertname: TaskflowProbeFailing, exp_alerts: [] }
+      - { eval_time: 30m, alertname: TaskflowDatabaseDown, exp_alerts: [] }
+      - { eval_time: 30m, alertname: TaskflowMetricsDown, exp_alerts: [] }
+      - { eval_time: 30m, alertname: TaskflowHighMemoryUsage, exp_alerts: [] }
+      - { eval_time: 30m, alertname: TaskflowProcessRestarted, exp_alerts: [] }
+
+  # ---------------------------------------------------------------- 20 % ошибок
+  # С 10-й минуты 20 из 100 запросов к API — 500, 8 из 24 проб падают.
+  - name: ошибки 20 % — горят TaskflowHighErrorRate и TaskflowProbeFailing
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/projects",method="GET",status_code="200"}'
+        values: '0+100x10 1080+80x19'
+      - series: 'http_request_duration_seconds_count{job="taskflow",route="/api/projects",method="GET",status_code="500"}'
+        values: '0x10 20+20x19'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="success"}'
+        values: '0+24x10 256+16x19'
+      - series: 'prober_probe_runs_total{job="taskflow-prober",probe="task_lifecycle",result="failure"}'
+        values: '0x10 8+8x19'
+    alert_rule_test:
+      # 11-я минута: доля уже выше порога, но пауза for (2m) не истекла.
+      - { eval_time: 11m, alertname: TaskflowHighErrorRate, exp_alerts: [] }
+      - eval_time: 20m
+        alertname: TaskflowHighErrorRate
+        exp_alerts:
+          - exp_labels: { severity: critical, service: taskflow, kind: service }
+            exp_annotations:
+              summary: 'TaskFlow: 20% ответов API — ошибки сервера (5xx)'
+              description: 'За последние 5 минут больше 5 % запросов к API завершились ошибкой 5xx. Где искать: логи `service.name:taskflow level:error` в Victoria Logs (поле error.message), панель «Что происходит с приложением» на дашборде, недавние выкатки (`kubectl rollout history deployment/taskflow -n taskflow`).'
+      - eval_time: 20m
+        alertname: TaskflowProbeFailing
+        exp_alerts:
+          - exp_labels: { severity: critical, service: taskflow, kind: service }
+            exp_annotations:
+              summary: 'TaskFlow недоступен для пользователей: 33.33% синтетических сценариев падают'
+              description: 'Больше 10 % запусков проб за 5 минут неуспешны. На каком шаге и почему: `sum by (probe, step, reason) (increase(prober_probe_failures_total[5m])) > 0` в vmui или панель «Пробер: неуспешные пробы» на дашборде.'
+
+  # ---------------------------------------------------------------- медленные ответы
+  # С 10-й минуты половина ответов — от 250 до 500 мс: p95 ≈ 475 мс.
+  - name: медленные ответы — горит TaskflowHighLatency
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/tasks",method="GET",status_code="200",le="0.25"}'
+        values: '0+100x10 1050+50x19'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/tasks",method="GET",status_code="200",le="0.5"}'
+        values: '0+100x30'
+      - series: 'http_request_duration_seconds_bucket{job="taskflow",route="/api/tasks",method="GET",status_code="200",le="+Inf"}'
+        values: '0+100x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: TaskflowHighLatency
+        exp_alerts:
+          - exp_labels: { severity: warning, service: taskflow, kind: service }
+            exp_annotations:
+              summary: 'TaskFlow: p95 времени ответа API 475ms — выше 250 мс'
+              description: '95-й перцентиль времени ответа API за 5 минут выше порога SLO latency. Частые причины: медленные запросы к PostgreSQL (метрики pg_stat_* экспортера), нехватка CPU, блокировки.'
+
+  # ---------------------------------------------------------------- база недоступна
+  - name: БД недоступна — горит TaskflowDatabaseDown
+    interval: 1m
+    input_series:
+      - series: 'pg_up{job="postgres"}'
+        values: '1x10 0x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TaskflowDatabaseDown
+        exp_alerts:
+          - exp_labels: { severity: critical, service: taskflow, kind: service }
+            exp_annotations:
+              summary: PostgreSQL TaskFlow недоступна
+              description: 'postgres-exporter не может выполнить запрос к базе (pg_up = 0) или метрик базы нет совсем. Проверьте под: `kubectl get pod db-0 -n taskflow`, `kubectl logs db-0 -c postgres -n taskflow`.'
+
+  # ---------------------------------------------------------------- метрики пропали
+  - name: ни одна реплика не отдаёт метрики — горит TaskflowMetricsDown
+    interval: 1m
+    input_series:
+      - series: 'up{job="taskflow",pod="taskflow-a"}'
+        values: '1x10 0x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TaskflowMetricsDown
+        exp_alerts:
+          - exp_labels: { severity: critical, service: taskflow, kind: service }
+            exp_annotations:
+              summary: Нет ни одной реплики TaskFlow, отдающей метрики
+              description: 'vmagent не может собрать /metrics ни с одной реплики TaskFlow 2 минуты. Проверьте `kubectl get pods -n taskflow` и цели vmagent (страница /targets).'
+
+  # ---------------------------------------------------------------- утечка памяти
+  # Реплика b с 10-й минуты занимает 230 MiB из 256 (90 %); реплика a — 70 MiB.
+  - name: утечка памяти в одной реплике — горит TaskflowHighMemoryUsage только для неё
+    interval: 1m
+    input_series:
+      - series: 'process_resident_memory_bytes{job="taskflow",pod="taskflow-a"}'
+        values: '73400320x30'
+      - series: 'process_resident_memory_bytes{job="taskflow",pod="taskflow-b"}'
+        values: '73400320x10 241172480x20'
+    alert_rule_test:
+      - { eval_time: 11m, alertname: TaskflowHighMemoryUsage, exp_alerts: [] }
+      - eval_time: 15m
+        alertname: TaskflowHighMemoryUsage
+        exp_alerts:
+          - exp_labels: { severity: warning, service: taskflow, kind: runtime, pod: taskflow-b }
+            exp_annotations:
+              summary: 'TaskFlow taskflow-b: процесс занимает 89.84% лимита памяти'
+              description: 'Резидентная память процесса Python (process_resident_memory_bytes) больше 80 % лимита контейнера 256 MiB дольше 2 минут. При достижении лимита контейнер будет убит (OOMKilled). Сравните с python_gc_objects_collected_total и с моментом последней выкатки.'
+
+  # ---------------------------------------------------------------- перезапуск процесса
+  # На 10-й минуте процесс в поде a стартовал заново; через 15 минут алерт гаснет.
+# Время старта — маленькие числа: хранилище vmalert-tool округляет значения
+# (~6 значащих цифр), и метка времени вида 1.7e9 «дрожала» бы.
+  - name: перезапуск процесса — TaskflowProcessRestarted горит 15 минут
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="taskflow",pod="taskflow-a"}'
+        values: '1000x10 1600x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: TaskflowProcessRestarted
+        exp_alerts:
+          - exp_labels: { severity: warning, service: taskflow, kind: runtime, pod: taskflow-a, job: taskflow }
+            exp_annotations:
+              summary: 'TaskFlow taskflow-a: процесс в поде перезапускался за последние 15 минут'
+              description: 'process_start_time_seconds изменился — контейнер перезапущен внутри того же пода. Причина: `kubectl describe pod taskflow-a -n taskflow` (Last State: OOMKilled / Error), логи прошлого запуска: `kubectl logs taskflow-a -n taskflow --previous`.'
+      - { eval_time: 30m, alertname: TaskflowProcessRestarted, exp_alerts: [] }
+
+  # ---------------------------------------------------------------- новый под
+  # Под появился на 10-й минуте (выкатка) — это не перезапуск, алерта нет.
+  - name: новый под при выкатке — TaskflowProcessRestarted не горит
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="taskflow",pod="taskflow-new"}'
+        values: '_x10 1600x20'
+    alert_rule_test:
+      - { eval_time: 12m, alertname: TaskflowProcessRestarted, exp_alerts: [] }

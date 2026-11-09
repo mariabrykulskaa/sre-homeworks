@@ -1,0 +1,165 @@
+# Alertmanager — получает сработавшие алерты от vmalert (-notifier.url),
+# группирует, подавляет лишние и рассылает уведомления.
+#
+# Получатель — почта. В учебном кластере письма уходят в Mailpit
+# (41-mailpit.yaml): тестовый SMTP-сервер с веб-интерфейсом, письма видны
+# в браузере. В реальной команде здесь был бы корпоративный SMTP, Telegram,
+# Slack или PagerDuty — меняется только раздел receivers.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/part-of: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: mailpit.monitoring.svc:1025
+      smtp_from: 'TaskFlow Alertmanager <alertmanager@taskflow.local>'
+      smtp_require_tls: false   # Mailpit внутри кластера, без TLS
+
+    route:
+      receiver: oncall-email
+      # Одно письмо на алерт и уровень: десять реплик с одной проблемой —
+      # одно уведомление, а не десять.
+      group_by: [alertname, severity]
+      group_wait: 30s        # подождать, вдруг загорятся родственные алерты
+      group_interval: 2m     # новые алерты в уже открытой группе — не чаще
+      repeat_interval: 4h    # напоминание, если алерт всё ещё горит
+      routes:
+        # Критичные — сразу и чаще напоминать: пользователи уже страдают.
+        - matchers: ['severity="critical"']
+          receiver: oncall-critical-email
+          group_wait: 10s
+          repeat_interval: 30m
+
+    # Тема письма: статус, алерт, уровень и summary первого горящего алерта группы
+    # (в группе остаются и погасшие — их summary в теме только у письма RESOLVED) —
+    # дежурный понимает суть, не открывая письмо. Стандартная тема склеивает
+    # все общие метки (instance, node, container…) и читается плохо.
+    templates:
+      - /etc/alertmanager/*.tmpl
+
+    receivers:
+      - name: oncall-email
+        email_configs:
+          - to: oncall@taskflow.local
+            send_resolved: true    # письмо и когда алерт погас
+            headers: { Subject: '{{ template "taskflow.subject" . }}' }
+      - name: oncall-critical-email
+        email_configs:
+          - to: oncall@taskflow.local, sre-lead@taskflow.local
+            send_resolved: true
+            headers: { Subject: '{{ template "taskflow.subject" . }}' }
+
+    inhibit_rules:
+      # БД лежит — ошибки API, медленные ответы и падающие пробы — следствие.
+      # Дежурному нужно одно письмо о причине, а не четыре о симптомах.
+      - source_matchers: ['alertname="TaskflowDatabaseDown"']
+        target_matchers: ['alertname=~"TaskflowHighErrorRate|TaskflowHighLatency|TaskflowProbeFailing"']
+      # Если по алерту уже горит critical, его warning-версия не нужна.
+      - source_matchers: ['severity="critical"']
+        target_matchers: ['severity="warning"']
+        equal: [alertname, slo]
+
+  taskflow.tmpl: |
+    {{ define "taskflow.subject" -}}
+    [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }} ({{ .CommonLabels.severity }}) — {{ if .Alerts.Firing }}{{ (index .Alerts.Firing 0).Annotations.summary }}{{ else }}{{ (index .Alerts.Resolved 0).Annotations.summary }}{{ end }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/part-of: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alertmanager
+        app.kubernetes.io/part-of: monitoring
+      annotations:
+        # Свои метрики Alertmanager: сколько уведомлений отправлено и сколько не удалось.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9093"
+        prometheus.io/path: /metrics
+        # Пересоздать под при изменении конфигурации (ConfigMap сам этого не делает).
+        config.revision: "3"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.34.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --web.listen-address=:9093
+            # Ссылки в письмах — на UI Alertmanager через port-forward.
+            - --web.external-url=http://127.0.0.1:9093
+            - --log.format=json
+          ports:
+            - name: http
+              containerPort: 9093
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+              readOnly: true
+            - name: storage
+              mountPath: /alertmanager
+          readinessProbe:
+            httpGet: { path: /-/ready, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+        # Тишины (silences) и журнал уведомлений; при пересоздании пода
+        # теряются — для учебного кластера достаточно.
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/part-of: monitoring
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: alertmanager
+  ports:
+    - name: http
+      port: 9093
+      targetPort: http
