@@ -42,7 +42,7 @@ data:
           # count() if (...) считает условно, math вычисляет процент.
           - alert: TaskflowHigh5xxRate
             expr: >-
-              _time:5m service.name:taskflow _msg:request
+              _time:5m service.name:taskflow _msg:=request
               | stats count() if (status:>=500) as failed, count() as total
               | math round((failed / total) * 100, 0.1) as failed_percent
               | filter failed_percent:>5
@@ -75,7 +75,7 @@ spec:
         app.kubernetes.io/part-of: taskflow-logging
       annotations:
         # Пересоздать под при изменении правил (ConfigMap сам этого не делает).
-        rules.revision: "2"
+        rules.revision: "3"
     spec:
       securityContext:
         runAsNonRoot: true

@@ -65,8 +65,20 @@ data:
           stream_name = .stream
           parsed, err = parse_json(to_string(.message) ?? "")
           if err == null && is_object(parsed) {
-            . = merge(., object!(parsed))
+            obj = object!(parsed)
+            . = merge(., obj)
             .stream = stream_name
+            # Чужие JSON-логи (postgres-exporter и другие программы на Go slog)
+            # пишут текст события в msg, а уровень — заглавными (INFO). Приводим
+            # к схеме приложения: message и level в нижнем регистре — иначе
+            # _msg была бы вся JSON-строка, а level:error не нашёл бы ERROR.
+            if !exists(obj.message) && is_string(obj.msg) {
+              .message = obj.msg
+              del(.msg)
+            }
+            if is_string(.level) {
+              .level = downcase(string!(.level))
+            }
           } else {
             # 2. Неструктурированные логи (PostgreSQL, init-контейнер wait-for-db):
             #    одна строка — одно сообщение. Уровень не выдумываем, а отмечаем,

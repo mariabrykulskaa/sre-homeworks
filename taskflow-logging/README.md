@@ -101,7 +101,7 @@ vmalert (`k8s/logging/31-vmalert.yaml`) раз в 30 секунд выполня
 | Алерт | Запрос | Порог |
 |---|---|---|
 | `TaskflowErrorLogs` | `_time:5m service.name:taskflow level:error \| stats by (kubernetes.pod) count() as errors` | `errors > 0` в течение 1 мин |
-| `TaskflowHigh5xxRate` | доля ответов `status >= 500` среди `_msg:request` за 5 минут | `> 5 %` в течение 1 мин |
+| `TaskflowHigh5xxRate` | доля ответов `status >= 500` среди `_msg:=request` за 5 минут | `> 5 %` в течение 1 мин |
 
 ```bash
 scripts/generate-traffic.sh --db-outage     # создать ошибки

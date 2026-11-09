@@ -48,9 +48,9 @@ query "(в) stats: число записей по сервису и уровню
   "_time:${MINUTES}m | stats by (service.name, level) count() as records | sort by (service.name, level)"
 
 query "(г) агрегаты по access-логу: запросы по путям, p95 длительности, сколько реплик их обслуживало" \
-  "_time:${MINUTES}m service.name:taskflow _msg:request | stats by (method, path) count() as requests, quantile(0.95, duration_ms) as p95_ms, count_uniq(kubernetes.pod) as pods | sort by (requests desc) | limit 10"
+  "_time:${MINUTES}m service.name:taskflow _msg:=request | stats by (method, path) count() as requests, quantile(0.95, duration_ms) as p95_ms, count_uniq(kubernetes.pod) as pods | sort by (requests desc) | limit 10"
 
 echo
 query "(г') top: самые частые пути ответов с ошибкой клиента/сервера" \
-  "_time:${MINUTES}m service.name:taskflow _msg:request status:>=400 | top 5 by (status, path)"
+  "_time:${MINUTES}m service.name:taskflow _msg:=request status:>=400 | top 5 by (status, path)"
 echo
