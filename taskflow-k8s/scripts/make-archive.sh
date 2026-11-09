@@ -19,9 +19,11 @@ trap 'rm -rf "$STAGE"' EXIT
 DEST="$STAGE/taskflow-k8s"
 mkdir -p "$DEST"
 
-cp -R "$ROOT/k8s" "$ROOT/scripts" "$DEST/"
+cp -R "$ROOT/k8s" "$DEST/"
+rsync -a --exclude node_modules "$ROOT/scripts/" "$DEST/scripts/"
+mkdir -p "$DEST/screencast"
 cp "$ROOT/Отчёт.md" "$ROOT/README.md" "$DEST/"
-cp "$SCREENCAST" "$DEST/"
+cp "$SCREENCAST" "$DEST/screencast/screencast.mp4"
 
 # Исходники приложения вместе с Dockerfile — чтобы образ собирался прямо из
 # архива. Отчёт первого задания, зависимости и локальные файлы не нужны.
