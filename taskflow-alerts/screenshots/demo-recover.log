@@ -3,3 +3,35 @@
 deployment.apps/taskflow env updated
 deployment "taskflow" successfully rolled out
 
+[15:31:18] == Ждём, пока алерты погаснут
+[15:37:27]   TaskflowHighErrorRate        погас
+[15:37:27]   TaskflowProbeFailing         погас
+[15:37:27]   TaskflowHighMemoryUsage      погас
+[15:38:23]   TaskflowProcessRestarted     погас
+Горящие алерты vmalert:
+  firing   SLOErrorBudgetExhausted      warning   slo=probes
+  firing   SLOErrorBudgetExhausted      warning   slo=availability
+  firing   SLOErrorBudgetSlowBurn       warning   slo=service
+  firing   SLOErrorBudgetSlowBurn       warning   slo=probes
+  firing   SLOErrorBudgetSlowBurn       warning   slo=availability
+  всего: 5
+Письма в Mailpit (http://127.0.0.1:8025):
+  15:37:57  [RESOLVED] TaskflowHighErrorRate (critical) — TaskFlow: 6.684% ответов API — ошибки сервера (5xx)  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:37:57  [RESOLVED] TaskflowProbeFailing (critical) — TaskFlow недоступен для пользователей: 10.08% синтетических сценариев падают  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:37:33  [FIRING:1] SLOErrorBudgetFastBurn (critical) — SLO service: бюджет ошибок сгорает в 73.3 раза быстрее допустимого (окно 1h)  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:33:49  [RESOLVED] TaskflowHighMemoryUsage (warning) — TaskFlow taskflow-6d9c7bcf6d-gzv5c: процесс занимает 86.25% лимита памяти  → oncall@taskflow.local
+  15:31:33  [FIRING:3] SLOErrorBudgetFastBurn (critical) — SLO availability: бюджет ошибок сгорает в 15.0 раза быстрее допустимого (окно 1h)  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:29:49  [FIRING:1] TaskflowProcessRestarted (warning) — TaskFlow taskflow-6d9c7bcf6d-gzv5c: процесс в поде перезапускался за последние 15 минут  → oncall@taskflow.local
+  15:29:49  [FIRING:2] TaskflowHighMemoryUsage (warning) — TaskFlow taskflow-6d9c7bcf6d-gzv5c: процесс занимает 86.25% лимита памяти  → oncall@taskflow.local
+  15:29:33  [FIRING:2] SLOErrorBudgetExhausted (warning) — SLO availability нарушен: бюджет ошибок за 30 дней израсходован  → oncall@taskflow.local
+  15:29:33  [FIRING:3] SLOErrorBudgetSlowBurn (warning) — SLO availability: бюджет ошибок сгорает в 13.9 раза быстрее допустимого (окно 6h)  → oncall@taskflow.local
+  15:27:57  [FIRING:1] TaskflowProbeFailing (critical) — TaskFlow недоступен для пользователей: 51.67% синтетических сценариев падают  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:27:57  [FIRING:1] TaskflowHighErrorRate (critical) — TaskFlow: 19.43% ответов API — ошибки сервера (5xx)  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:27:49  [FIRING:1] TaskflowProcessRestarted (warning) — TaskFlow taskflow-6d9c7bcf6d-gzv5c: процесс в поде перезапускался за последние 15 минут  → oncall@taskflow.local
+  15:27:49  [FIRING:1] TaskflowHighMemoryUsage (warning) — TaskFlow taskflow-6d9c7bcf6d-hb27n: процесс занимает 86.32% лимита памяти  → oncall@taskflow.local
+  всего: 13
+  15:39:49  [RESOLVED] TaskflowProcessRestarted (warning) — TaskFlow taskflow-6d9c7bcf6d-gzv5c: процесс в поде перезапускался за последние 15 минут  → oncall@taskflow.local
+  15:39:33  [RESOLVED] SLOErrorBudgetFastBurn (critical) — SLO availability: бюджет ошибок сгорает в 14.6 раза быстрее допустимого (окно 1h)  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:37:57  [RESOLVED] TaskflowHighErrorRate (critical) — TaskFlow: 6.684% ответов API — ошибки сервера (5xx)  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:37:57  [RESOLVED] TaskflowProbeFailing (critical) — TaskFlow недоступен для пользователей: 10.08% синтетических сценариев падают  → oncall@taskflow.local, sre-lead@taskflow.local
+  15:33:49  [RESOLVED] TaskflowHighMemoryUsage (warning) — TaskFlow taskflow-6d9c7bcf6d-gzv5c: процесс занимает 86.25% лимита памяти  → oncall@taskflow.local
