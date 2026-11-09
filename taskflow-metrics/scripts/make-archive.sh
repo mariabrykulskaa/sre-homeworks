@@ -42,7 +42,7 @@ helm template "$VM_AGENT_RELEASE" "$HELM_REPO_NAME/victoria-metrics-agent" \
 # архива. Зависимости, локальные файлы и отчёты других заданий не нужны.
 rsync -a \
   --exclude node_modules --exclude .git --exclude .env --exclude '*.log' \
-  --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' \
+  --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' --exclude __pycache__ --exclude .pytest_cache --exclude .venv \
   "$APP_DIR/" "$DEST/app/"
 
 rm -f "$OUT"

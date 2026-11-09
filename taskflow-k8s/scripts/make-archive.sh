@@ -27,7 +27,7 @@ cp "$SCREENCAST" "$DEST/"
 # архива. Отчёт первого задания, зависимости и локальные файлы не нужны.
 rsync -a \
   --exclude node_modules --exclude .git --exclude .env --exclude '*.log' \
-  --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' \
+  --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' --exclude __pycache__ --exclude .pytest_cache --exclude .venv \
   "$APP_DIR/" "$DEST/app/"
 
 rm -f "$OUT"

@@ -3,10 +3,10 @@
   (нет — сбоев в приложении нет)
 Реплик PostgreSQL: 1
 
-[01:02:42] == Норма: сбоев нет — исходные значения SLI, SLO и SLA (1 мин)
-[01:03:42]   прошло 1 из 1 мин
+[19:14:15] == Норма: сбоев нет — исходные значения SLI, SLO и SLA (1 мин)
+[19:15:15]   прошло 1 из 1 мин
 
-[01:03:42] == Ошибки БД: 10 % запросов падают → 5xx; минуты становятся плохими (3 мин)
+[19:15:15] == Ошибки БД: 10 % запросов падают → 5xx; минуты становятся плохими (3 мин)
 $ scripts/fault.sh errors 0.1
 deployment.apps/taskflow env updated
 Waiting for deployment spec update to be observed...
@@ -17,15 +17,15 @@ Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas hav
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 deployment "taskflow" successfully rolled out
-[01:05:03]   прошло 1 из 3 мин
-[01:06:03]   прошло 2 из 3 мин
-[01:07:03]   прошло 3 из 3 мин
+[19:16:31]   прошло 1 из 3 мин
+[19:17:31]   прошло 2 из 3 мин
+[19:18:31]   прошло 3 из 3 мин
 
-[01:07:03] == Сбой снят: SLI вернулись, бюджет больше не тратится (2 мин)
+[19:18:31] == Сбой снят: SLI вернулись, бюджет больше не тратится (2 мин)
 $ scripts/fault.sh off
 deployment.apps/taskflow env updated
-Waiting for deployment spec update to be observed...
 Waiting for deployment "taskflow" rollout to finish: 0 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
@@ -34,15 +34,12 @@ Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending 
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 deployment "taskflow" successfully rolled out
-[01:08:22]   прошло 1 из 2 мин
-[01:09:22]   прошло 2 из 2 мин
+[19:19:48]   прошло 1 из 2 мин
+[19:20:48]   прошло 2 из 2 мин
 
-[01:09:22] == Медленная БД: +300 мс на запрос → SLI latency, ответы без ошибок (2 мин)
+[19:20:48] == Медленная БД: +300 мс на запрос → SLI latency, ответы без ошибок (2 мин)
 $ scripts/fault.sh latency 300
 deployment.apps/taskflow env updated
-Waiting for deployment spec update to be observed...
-Waiting for deployment spec update to be observed...
-Waiting for deployment "taskflow" rollout to finish: 0 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
@@ -50,14 +47,12 @@ Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending 
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 deployment "taskflow" successfully rolled out
-[01:10:46]   прошло 1 из 2 мин
-[01:11:46]   прошло 2 из 2 мин
+[19:22:04]   прошло 1 из 2 мин
+[19:23:04]   прошло 2 из 2 мин
 
-[01:11:46] == Задержка снята (1 мин)
+[19:23:04] == Задержка снята (1 мин)
 $ scripts/fault.sh off
 deployment.apps/taskflow env updated
-Waiting for deployment spec update to be observed...
-Waiting for deployment spec update to be observed...
 Waiting for deployment "taskflow" rollout to finish: 0 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
 Waiting for deployment "taskflow" rollout to finish: 1 out of 2 new replicas have been updated...
@@ -66,27 +61,25 @@ Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending 
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "taskflow" rollout to finish: 1 old replicas are pending termination...
 deployment "taskflow" successfully rolled out
-[01:13:11]   прошло 1 из 1 мин
+[19:24:20]   прошло 1 из 1 мин
 
-[01:13:11] == PostgreSQL остановлена → простой сервиса, пробы не проходят (3 мин)
+[19:24:20] == PostgreSQL остановлена → простой сервиса, пробы не проходят (3 мин)
 $ scripts/fault.sh db-down
 statefulset.apps/db scaled
 pod/db-0 condition met
-[01:14:18]   прошло 1 из 3 мин
-[01:15:18]   прошло 2 из 3 мин
-[01:16:18]   прошло 3 из 3 мин
+[19:25:21]   прошло 1 из 3 мин
+[19:26:21]   прошло 2 из 3 мин
+[19:27:21]   прошло 3 из 3 мин
 
-[01:16:18] == PostgreSQL вернулась: быстрые алерты гаснут, бюджет остаётся потраченным (3 мин)
+[19:27:21] == PostgreSQL вернулась: быстрые алерты гаснут, бюджет остаётся потраченным (3 мин)
 $ scripts/fault.sh db-up
 statefulset.apps/db scaled
-Waiting for statefulset spec update to be observed...
-Waiting for 1 pods to be ready...
 Waiting for 1 pods to be ready...
 partitioned roll out complete: 1 new pods have been updated...
-pod/taskflow-7df9d4d8f7-6rmj4 condition met
-pod/taskflow-7df9d4d8f7-ts4lw condition met
-[01:17:34]   прошло 1 из 3 мин
-[01:18:34]   прошло 2 из 3 мин
-[01:19:34]   прошло 3 из 3 мин
+pod/taskflow-84645cdbc9-26mq5 condition met
+pod/taskflow-84645cdbc9-b258m condition met
+[19:29:56]   прошло 1 из 3 мин
+[19:30:56]   прошло 2 из 3 мин
+[19:31:56]   прошло 3 из 3 мин
 
-[01:19:34] Сценарий завершён. Итог: scripts/check-slo.sh
+[19:31:56] Сценарий завершён. Итог: scripts/check-slo.sh

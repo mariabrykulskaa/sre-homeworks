@@ -47,7 +47,8 @@ render "$GRAFANA_RELEASE" "$GRAFANA_REPO_NAME/grafana" "$GRAFANA_CHART_VERSION" 
 # Скрипты и исходники с Dockerfile — чтобы образы собирались прямо из архива.
 # Зависимости (их ставит npm ci), локальные файлы и отчёты других заданий не нужны.
 EXCLUDES=(--exclude node_modules --exclude .git --exclude .env --exclude '*.log'
-          --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' --exclude coverage)
+          --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' --exclude coverage
+          --exclude __pycache__ --exclude .pytest_cache --exclude .venv)
 rsync -a "${EXCLUDES[@]}" "$ROOT/scripts/" "$DEST/scripts/"
 rsync -a "${EXCLUDES[@]}" "$APP_DIR/" "$DEST/app/"
 rsync -a "${EXCLUDES[@]}" "$PROBER_DIR/" "$DEST/prober/"

@@ -25,7 +25,7 @@ cp "$ROOT/Отчёт.md" "$ROOT/README.md" "$DEST/"
 # архива. Зависимости, локальные файлы и отчёты других заданий не нужны.
 rsync -a \
   --exclude node_modules --exclude .git --exclude .env --exclude '*.log' \
-  --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' \
+  --exclude .DS_Store --exclude 'Отчёт.md' --exclude '*.zip' --exclude __pycache__ --exclude .pytest_cache --exclude .venv \
   "$APP_DIR/" "$DEST/app/"
 
 rm -f "$OUT"

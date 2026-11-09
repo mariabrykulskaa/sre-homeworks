@@ -1,0 +1,10 @@
+{
+  "name": "taskflow-k8s-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Зависимости скриптов ДЗ №2: playwright-core для записи кликов в UI (скринкаст)",
+  "type": "module",
+  "dependencies": {
+    "playwright-core": "1.61.1"
+  }
+}
