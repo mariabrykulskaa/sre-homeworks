@@ -2,16 +2,16 @@
 # Собирает архив для сдачи: манифесты, исходники приложения с Dockerfile,
 # отчёт, скрипты и скринкаст.
 #
-# Использование: scripts/make-archive.sh путь/к/скринкасту.mp4
+# Использование: scripts/make-archive.sh [путь/к/скринкасту.mp4]   (по умолчанию screencast/screencast.mp4)
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
-if [[ $# -lt 1 || ! -f "${1:-}" ]]; then
-  echo "Использование: $0 путь/к/скринкасту (файл обязателен — его требует задание)" >&2
+SCREENCAST="${1:-$ROOT/screencast/screencast.mp4}"
+if [[ ! -f "$SCREENCAST" ]]; then
+  echo "Нет скринкаста $SCREENCAST — сначала scripts/record-screencast.sh (файл требует задание)" >&2
   exit 1
 fi
-SCREENCAST="$1"
 
 OUT="$ROOT/taskflow-k8s.zip"
 STAGE="$(mktemp -d)"

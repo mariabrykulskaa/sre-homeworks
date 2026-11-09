@@ -10,8 +10,12 @@
 # (brew install asciinema agg ffmpeg node; npm ci --prefix scripts).
 #
 # Использование: scripts/record-screencast.sh [--fresh]
-#   --fresh — перед записью удалить namespace taskflow (вместе с данными БД), чтобы
-#             `kubectl apply` в записи поднимал всё с нуля.
+#   --fresh — перед записью удалить namespace taskflow и данные БД, чтобы `kubectl apply`
+#             в записи поднимал всё с нуля. Данные удаляются и с диска узла: hostPath-провижинер
+#             minikube при удалении PVC папку не стирает, и новый PVC с тем же именем получил бы
+#             старую базу.
+# Если в кластере работает пробер из ДЗ №5, на время записи он останавливается — иначе
+# его синтетические проекты мелькали бы в UI.
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -25,12 +29,23 @@ fi
 
 if [[ "${1:-}" == --fresh ]]; then
   kubectl delete namespace "$NS" --ignore-not-found --wait=true
+  minikube ssh -- "sudo rm -rf /tmp/hostpath-provisioner/$NS"
 fi
+
+prober_replicas="$(kubectl -n monitoring get deploy taskflow-prober -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
+if [[ -n "$prober_replicas" && "$prober_replicas" != 0 ]]; then
+  kubectl -n monitoring scale deploy/taskflow-prober --replicas=0
+fi
+restore_prober() {
+  if [[ -n "$prober_replicas" && "$prober_replicas" != 0 ]]; then
+    kubectl -n monitoring scale deploy/taskflow-prober --replicas="$prober_replicas" >/dev/null
+  fi
+}
 
 OUT_DIR="$ROOT/screencast"
 mkdir -p "$OUT_DIR"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"; kill "${pf_pid:-}" 2>/dev/null || true' EXIT
+trap 'rm -rf "$WORK"; kill "${pf_pid:-}" 2>/dev/null || true; restore_prober' EXIT
 
 # 1. Терминал.
 export TERM="${TERM:-xterm-256color}"
@@ -51,7 +66,9 @@ video="$(node "$ROOT/scripts/ui-demo.mjs" http://127.0.0.1:8080/ "$WORK/video" |
 # 3. Склейка: обе части — 1920×1080, 25 кадров/с.
 fit='scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x272822,fps=25,format=yuv420p'
 ffmpeg -y -loglevel error -i "$WORK/terminal.gif" -vf "$fit" -c:v libx264 -crf 23 "$WORK/part1.mp4"
-ffmpeg -y -loglevel error -i "$video" -vf "$fit" -c:v libx264 -crf 23 "$WORK/part2.mp4"
+# Headless Chrome в режиме записи видео не дорисовывает нижние ~88 px окна (серая
+# полоса) — обрезаем их до приведения к 1920×1080.
+ffmpeg -y -loglevel error -i "$video" -vf "crop=iw:ih-88:0:0,$fit" -c:v libx264 -crf 23 "$WORK/part2.mp4"
 printf "file '%s'\nfile '%s'\n" "$WORK/part1.mp4" "$WORK/part2.mp4" > "$WORK/list.txt"
 ffmpeg -y -loglevel error -f concat -safe 0 -i "$WORK/list.txt" -c copy -movflags +faststart \
   "$OUT_DIR/screencast.mp4"

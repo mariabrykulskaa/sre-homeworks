@@ -12,7 +12,7 @@ if (!url || !videoDir) {
   process.exit(2);
 }
 
-const size = { width: 1280, height: 800 };
+const size = { width: 1280, height: 720 };
 const browser = await chromium.launch({ channel: 'chrome', headless: true, slowMo: 120 });
 const context = await browser.newContext({ viewport: size, recordVideo: { dir: videoDir, size } });
 const page = await context.newPage();

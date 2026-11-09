@@ -26,7 +26,7 @@ cd "$ROOT"
 clear
 say "ДЗ №2: TaskFlow (Python + FastAPI) и PostgreSQL в minikube"
 run "kubectl get nodes"
-run "minikube image ls | grep taskflow"
+run "minikube image ls | grep -E '(^|/)taskflow:'"
 run "ls k8s/"
 
 say "Запуск приложения и зависимостей"

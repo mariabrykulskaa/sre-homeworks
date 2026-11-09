@@ -18,6 +18,10 @@ scripts/
   deploy.sh           kubectl apply + ожидание готовности
   destroy.sh          удаление namespace со всем содержимым (включая том БД)
   make-archive.sh     архив для сдачи
+  demo.sh             терминальная часть скринкаста (apply, get pods, scale)
+  ui-demo.mjs         клики в UI для скринкаста (Playwright + установленный Chrome)
+  record-screencast.sh  запись скринкаста: asciinema + Playwright → screencast/screencast.mp4
+screencast/           скринкаст (screencast.mp4) и запись терминала terminal.cast
 app/                  (в архиве) исходники приложения и его Dockerfile
 ```
 
