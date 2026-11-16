@@ -1,0 +1,26 @@
+[
+  {
+    "file": "taskflow-overview.json",
+    "receipt": {
+      "folderUid": "cg3s099gibegwe",
+      "id": 4007895049994240,
+      "slug": "taskflow-c2b7-prilozhenie-python-i-sla",
+      "status": "success",
+      "uid": "taskflow-overview",
+      "url": "/d/taskflow-overview/taskflow-c2b7-prilozhenie-python-i-sla",
+      "version": 2
+    }
+  },
+  {
+    "file": "postgresql-exporter.json",
+    "receipt": {
+      "folderUid": "cg3s099gibegwe",
+      "id": 4007895259709440,
+      "slug": "postgresql-database-c2b7-taskflow-import-9628",
+      "status": "success",
+      "uid": "taskflow-postgresql",
+      "url": "/d/taskflow-postgresql/postgresql-database-c2b7-taskflow-import-9628",
+      "version": 2
+    }
+  }
+]

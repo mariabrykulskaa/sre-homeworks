@@ -9,3 +9,5 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.zip
+# Черновые записи браузера; готовые скринкасты сохранены в MP4.
+taskflow-grafana/screencast/page@*.webm

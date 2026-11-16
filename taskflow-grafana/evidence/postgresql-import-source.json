@@ -1,0 +1,20 @@
+{
+  "catalog_id": 9628,
+  "revision": 8,
+  "author": "Lucas Estienne",
+  "catalog_url": "https://grafana.com/grafana/dashboards/9628-postgresql-database/",
+  "download_url": "https://grafana.com/api/dashboards/9628/revisions/8/download",
+  "original_sha256": "521bac34065bcadedf255fc384550ae0528e9a74e91b4475e583b6afe9c39cc7",
+  "original_file": "dashboards/upstream/postgresql-9628-r8.json",
+  "adapted_file": "dashboards/postgresql-exporter.json",
+  "grafana_uid": "taskflow-postgresql",
+  "changes": [
+    "graph -> timeseries; singlestat -> stat",
+    "Datasource uid=victoriametrics",
+    "Replace release and kubernetes_namespace filters with job=postgres and actual instance labels",
+    "Use pg_up instead of unavailable pg_static; explicitly label exporter uptime",
+    "Correct memory gauge expressions and tuple-counter units",
+    "Keep exported PostgreSQL 17 bgwriter series; replace legacy checkpoint panel with available I/O timing",
+    "Show zero-valued metrics; defaults datname=taskflow, instance=All"
+  ]
+}

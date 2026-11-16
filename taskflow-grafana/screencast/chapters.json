@@ -1,0 +1,54 @@
+{
+  "recorded_at": "2026-11-16T21:17:50.701Z",
+  "stages": [
+    {
+      "at_seconds": 5,
+      "screenshot": "06-victoriametrics-datasource.png",
+      "description": "01 / Источник данных: VictoriaMetrics через встроенный Prometheus datasource.",
+      "url": "http://127.0.0.1:3000/connections/datasources/edit/victoriametrics"
+    },
+    {
+      "at_seconds": 17,
+      "screenshot": "01-application-red.png",
+      "description": "02 / TaskFlow: доступность реплик и БД, RPS, ошибки и задержка API — подход RED.",
+      "url": "http://127.0.0.1:3000/d/taskflow-overview/taskflow-c2b7-prilozhenie-python-i-sla?from=now-1h&to=now&timezone=Europe%2FMoscow&var-pod=$__all&refresh=15s"
+    },
+    {
+      "at_seconds": 26,
+      "screenshot": "02-python-runtime.png",
+      "description": "03 / Python: CPU, RSS, файловые дескрипторы, сборщик мусора и время работы процессов.",
+      "url": "http://127.0.0.1:3000/d/taskflow-overview/taskflow-c2b7-prilozhenie-python-i-sla?from=now-1h&to=now&timezone=Europe%2FMoscow&var-pod=$__all&refresh=15s"
+    },
+    {
+      "at_seconds": 36,
+      "screenshot": "03-prober-sla.png",
+      "description": "04 / Отдельная панель SLA пробера за 30d; рядом цель 99%, SLA сервиса и покрытие окна.",
+      "url": "http://127.0.0.1:3000/d/taskflow-overview/taskflow-c2b7-prilozhenie-python-i-sla?from=now-1h&to=now&timezone=Europe%2FMoscow&var-pod=$__all&refresh=15s"
+    },
+    {
+      "at_seconds": 45,
+      "screenshot": "07-business-metrics.png",
+      "description": "05 / Метрики продукта: создание задач, переходы статусов и время до завершения.",
+      "url": "http://127.0.0.1:3000/d/taskflow-overview/taskflow-c2b7-prilozhenie-python-i-sla?from=now-1h&to=now&timezone=Europe%2FMoscow&var-pod=$__all&refresh=15s"
+    },
+    {
+      "at_seconds": 56,
+      "screenshot": "04-postgresql-overview.png",
+      "description": "06 / Импорт PostgreSQL Database, Grafana.com 9628/r8: доступность БД, экспортер и настройки.",
+      "url": "http://127.0.0.1:3000/d/taskflow-postgresql/postgresql-database-c2b7-taskflow-import-9628?from=now-1h&to=now&timezone=Europe%2FMoscow&var-instance=$__all&var-datname=taskflow&var-mode=$__all&refresh=15s"
+    },
+    {
+      "at_seconds": 66,
+      "screenshot": "05-postgresql-database.png",
+      "description": "07 / Живые данные PostgreSQL: сессии, транзакции, операции с данными и блокировки.",
+      "url": "http://127.0.0.1:3000/d/taskflow-postgresql/postgresql-database-c2b7-taskflow-import-9628?from=now-1h&to=now&timezone=Europe%2FMoscow&var-instance=$__all&var-datname=taskflow&var-mode=$__all&refresh=15s"
+    },
+    {
+      "at_seconds": 72,
+      "screenshot": "08-postgresql-io.png",
+      "description": "08 / PostgreSQL: cache hit ratio, bgwriter, конфликты, deadlocks, временные файлы и I/O.",
+      "url": "http://127.0.0.1:3000/d/taskflow-postgresql/postgresql-database-c2b7-taskflow-import-9628?from=now-1h&to=now&timezone=Europe%2FMoscow&var-instance=$__all&var-datname=taskflow&var-mode=$__all&refresh=15s"
+    }
+  ],
+  "query_errors": []
+}

@@ -1,0 +1,26 @@
+# Несекретная конфигурация (III фактор): всё, что меняется между
+# окружениями, но не является секретом. Подаётся в контейнеры как
+# переменные окружения через envFrom / configMapKeyRef.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taskflow-config
+  namespace: taskflow
+  labels:
+    app.kubernetes.io/part-of: taskflow
+data:
+  # Приложение
+  PORT: "3000"
+  APP_ENV: production
+  RATE_LIMIT_PER_MINUTE: "600"
+  # Порог логирования: debug | info | warn | error (см. taskflow/logger.py)
+  LOG_LEVEL: info
+  # Порт /metrics (OpenMetrics). Отдельный от PORT и не публикуется в Service:
+  # метрики забирает vmagent напрямую с пода, снаружи кластера их не видно.
+  # Должен совпадать с аннотацией prometheus.io/port в 20-app.yaml.
+  METRICS_PORT: "9464"
+  # База данных: имя Service PostgreSQL (DNS внутри кластера) и порт
+  DB_HOST: db
+  DB_PORT: "5432"
+  POSTGRES_DB: taskflow
+  POSTGRES_USER: taskflow

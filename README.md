@@ -18,8 +18,10 @@
 | 4 | [`taskflow-metrics/`](taskflow-metrics/) | метрики: VictoriaMetrics + vmagent, рантайм Python, бизнес-метрики, postgres-exporter | [Отчёт.md](taskflow-metrics/Отчёт.md) |
 | 5 | [`taskflow-sla/`](taskflow-sla/) | SLI, SLO, SLA: пробер, правила vmalert, дашборд Grafana | [Отчёт.md](taskflow-sla/Отчёт.md) |
 | 6 | [`taskflow-alerts/`](taskflow-alerts/) | алерты на метрики сервиса и рантайма Python, Alertmanager, уведомления на почту | [Отчёт.md](taskflow-alerts/Отчёт.md) |
+| 7 | [`taskflow-grafana/`](taskflow-grafana/) | Grafana: RED, рантайм Python, SLA пробера, импорт PostgreSQL Exporter | [Отчёт.md](taskflow-grafana/Отчёт.md) |
 
-Инструкции по запуску — в `README.md` каждого каталога. Архив для сдачи каждого задания собирает
-`scripts/make-archive.sh` в его каталоге (исходники `app/` и `prober/` копируются в архив).
+Инструкции по запуску — в `README.md` каждого каталога. Архив для сдачи собирает
+`scripts/make-archive.sh` в каталоге задания; для Grafana — `python3 scripts/make-archive.py`.
+Исходники `app/` и `prober/` копируются в архив.
 
 Первая версия приложения была на Node.js + Express — она в ветке `main`.

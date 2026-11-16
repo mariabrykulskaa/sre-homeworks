@@ -1,0 +1,22 @@
+NAMESPACE     NAME                                                READY   STATUS    RESTARTS        AGE
+kube-system   coredns-559f6c778d-ll558                            1/1     Running   1 (7d10h ago)   10d
+kube-system   etcd-minikube                                       1/1     Running   1 (7d10h ago)   10d
+kube-system   kube-apiserver-minikube                             1/1     Running   1 (7d10h ago)   10d
+kube-system   kube-controller-manager-minikube                    1/1     Running   1 (7d10h ago)   10d
+kube-system   kube-proxy-gdnsh                                    1/1     Running   1 (7d10h ago)   10d
+kube-system   kube-scheduler-minikube                             1/1     Running   1 (7d10h ago)   10d
+kube-system   storage-provisioner                                 1/1     Running   9 (27h ago)     10d
+logging       alertmanager-56c6d8b8d6-26hv8                       1/1     Running   1 (7d10h ago)   10d
+logging       vector-75hb9                                        1/1     Running   0               7d8h
+logging       victoria-logs-7854fb9845-dz2bx                      1/1     Running   1 (7d10h ago)   10d
+logging       vmalert-8455d78c9d-5fhrh                            1/1     Running   0               7d8h
+monitoring    alertmanager-6584785968-kgxsp                       1/1     Running   1 (47h ago)     7d8h
+monitoring    grafana-7cb6847cc-zrt97                             1/1     Running   0               7m40s
+monitoring    mailpit-b89884565-klgh5                             1/1     Running   1 (47h ago)     7d9h
+monitoring    taskflow-prober-c94f697d-xb85h                      1/1     Running   0               7d4h
+monitoring    vm-single-victoria-metrics-agent-65dd48f4f7-vcmbr   1/1     Running   0               7d9h
+monitoring    vm-single-victoria-metrics-single-server-0          1/1     Running   0               7d9h
+monitoring    vmalert-75d7d8c895-7sw85                            1/1     Running   0               7d9h
+taskflow      db-0                                                2/2     Running   1 (47h ago)     7d4h
+taskflow      taskflow-779d8759bc-ppjnl                           1/1     Running   0               7d4h
+taskflow      taskflow-779d8759bc-vg65b                           1/1     Running   1 (47h ago)     7d4h

@@ -1,0 +1,200 @@
+# PostgreSQL — сторонняя служба (IV фактор) со состоянием.
+#
+# ДЗ №4: в под добавлен sidecar postgres-exporter — готовый экспортер,
+# который ходит в PostgreSQL по 127.0.0.1 (контейнеры пода делят сетевое
+# пространство) и отдаёт статистику СУБД на :9187/metrics. vmagent находит
+# под по аннотациям prometheus.io/*, как и поды приложения.
+#
+# Headless Service: даёт стабильное DNS-имя `db` (полностью —
+# db.taskflow.svc.cluster.local), по которому приложение находит базу.
+# clusterIP: None — без виртуального IP, имя резолвится прямо в IP пода;
+# для StatefulSet это стандартная связка. Пока под не прошёл readiness,
+# его адрес в DNS не публикуется (publishNotReadyAddresses по умолчанию false).
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: taskflow
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: taskflow
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+# StatefulSet, а не Deployment: у базы есть состояние, ей нужен
+# постоянный том и стабильная идентичность пода (db-0). volumeClaimTemplates
+# создаёт PersistentVolumeClaim, который переживает перезапуск пода.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: taskflow
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: taskflow
+spec:
+  serviceName: db
+  # Одна реплика: PostgreSQL без репликации не масштабируется горизонтально
+  # простым увеличением replicas. Масштабируем только stateless-приложение.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: taskflow
+      # Скрейпится порт экспортера: у самого PostgreSQL HTTP-метрик нет.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext:
+        # Пользователь postgres в образе postgres:*-alpine — uid/gid 70.
+        # fsGroup делает примонтированный том доступным этой группе,
+        # чтобы сервер запускался не от root.
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: taskflow-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: taskflow-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: taskflow-db-credentials
+                  key: POSTGRES_PASSWORD
+            # Данные — в подкаталоге тома: корень тома принадлежит root
+            # (его создаёт provisioner), а initdb требует, чтобы каталог
+            # данных принадлежал пользователю postgres.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            # Корневая ФС контейнера — только чтение; каталоги, куда PostgreSQL
+            # пишет (unix-сокет, временные файлы), вынесены в emptyDir.
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+          # Startup: даёт первому запуску (initdb) до 150 с, пока liveness
+          # не начала считать неудачи. Readiness: сервер принимает соединения —
+          # до этого под не попадает в DNS Service `db`. Liveness: перезапуск
+          # зависшего сервера. -h 127.0.0.1 — проверяем именно TCP-порт.
+          startupProbe:
+            exec:
+              command: &pg_isready
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: *pg_isready
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: *pg_isready
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        # Экспортер метрик PostgreSQL: pg_up, соединения и транзакции по базам
+        # (pg_stat_database), размеры БД, блокировки, активность, bgwriter/WAL,
+        # статистика таблиц приложения (pg_stat_user_tables).
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --log.format=json
+          ports:
+            - name: metrics
+              containerPort: 9187
+          env:
+            # Отдельная роль postgres_exporter с правами pg_monitor (миграция
+            # 002_monitoring_role.sql приложения): статистику читать может,
+            # данные приложения — нет. Пароль не нужен: подключения с
+            # 127.0.0.1 pg_hba образа postgres пропускает (trust), а снаружи
+            # пода роль без пароля не войдёт (scram-sha-256). Поэтому Secret
+            # с паролем суперпользователя экспортеру не монтируется вовсе.
+            # До первого запуска миграций роли ещё нет: pg_up = 0, пока поды
+            # приложения не применят миграции, — экспортер переподключается сам.
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: taskflow-config
+                  key: POSTGRES_DB
+            - name: DATA_SOURCE_URI
+              value: 127.0.0.1:5432/$(POSTGRES_DB)?sslmode=disable
+            - name: DATA_SOURCE_USER
+              value: postgres_exporter
+          # Только liveness: readiness экспортера сделала бы готовность пода БД
+          # (а значит, и DNS-имя `db`) зависимой от мониторинга.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext: *restricted
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName не указан — используется StorageClass по умолчанию
+        # (в minikube это `standard`, hostPath-provisioner).
+        resources:
+          requests:
+            storage: 1Gi
