@@ -1,0 +1,15 @@
+# Боевой маршрут: весь трафик taskflow.local — на blue. Переключение и откат —
+# замена имени Service в backendRefs (scripts/demo-blue-green.sh).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: taskflow
+spec:
+  parentRefs:
+    - name: eg
+  hostnames:
+    - taskflow.local
+  rules:
+    - backendRefs:
+        - name: taskflow-blue
+          port: 80

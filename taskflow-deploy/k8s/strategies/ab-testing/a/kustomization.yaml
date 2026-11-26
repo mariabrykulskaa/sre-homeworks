@@ -1,0 +1,15 @@
+# Вариант A — версия 2.1.0, для всех пользователей.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../app
+nameSuffix: -a
+# includeSelectors: метка попадает и в селекторы Deployment/Service, поэтому
+# Service taskflow-a выбирает только поды своей дорожки.
+labels:
+  - pairs:
+      track: a
+    includeSelectors: true
+images:
+  - name: taskflow
+    newTag: "2.1.0"

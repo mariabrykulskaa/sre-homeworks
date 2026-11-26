@@ -1,4 +1,4 @@
-# TaskFlow 2.0 (Python)
+# TaskFlow 2.1 (Python)
 
 Простое клиент-серверное приложение — трекер задач по проектам.
 Бэкенд: **Python 3.13 + FastAPI** (REST API, HTTP/1.1), сервер **uvicorn**.
@@ -50,6 +50,7 @@ API против настоящего PostgreSQL. База для тестов �
 |---|---|---|
 | GET | `/api/health` | Liveness: процесс жив (без похода в БД) |
 | GET | `/api/ready` | Readiness: приложение готово, БД доступна (503 — нет) |
+| GET | `/api/version` | Версия сборки и реплика: `{service, version, instance}` |
 | GET | `/api/projects?limit=&offset=` | Список проектов |
 | GET | `/api/projects/{id}` | Один проект |
 | POST | `/api/projects` | Создать проект `{name, description?}` |
@@ -66,6 +67,12 @@ API против настоящего PostgreSQL. База для тестов �
 запросов; `500` — внутренняя ошибка; `503` — БД недоступна (только `/api/ready`).
 
 Метрики (OpenMetrics) — `GET /metrics` на отдельном порту `METRICS_PORT` (9464).
+
+Версия и реплика видны в каждом ответе — заголовки `X-App-Version` и `X-Served-By` (имя пода),
+в каждой строке лога — поле `service.version`, в метриках — `taskflow_build_info{version}`.
+Версию задаёт сборка образа: `docker build --build-arg APP_VERSION=2.2.0 …` (по умолчанию —
+версия исходников, `taskflow/__init__.py`). Выкатка двух версий через Envoy Gateway —
+[../taskflow-deploy/](../taskflow-deploy/).
 
 ## Структура
 
@@ -92,4 +99,5 @@ tests/               pytest
 
 Все настройки — переменные окружения, полный список с пояснениями — в [.env.example](.env.example):
 `DATABASE_URL` (обязательно), `PORT`, `HOST`, `APP_ENV`, `RATE_LIMIT_PER_MINUTE`, `LOG_LEVEL`,
-`SERVICE_NAME`, `METRICS_PORT`, `FAULT_ERROR_RATE`, `FAULT_LATENCY_MS`, `FAULT_MEMORY_MB`.
+`SERVICE_NAME`, `METRICS_PORT`, `FAULT_ERROR_RATE`, `FAULT_LATENCY_MS`, `FAULT_MEMORY_MB`,
+`POD_NAME` (имя реплики для `X-Served-By`; в Kubernetes — из Downward API).

@@ -5,9 +5,12 @@ node_modules/
 # журналы демонстраций — часть отчётов
 !**/screenshots/*.log
 !**/screencast/*.log
+!taskflow-deploy/logs/*.log
 __pycache__/
 .pytest_cache/
 .venv/
 *.zip
+# Склейка пяти видео ДЗ №8 подряд: дублирует отдельные файлы, пересобирается scripts/record.sh.
+taskflow-deploy/screencast/all-strategies.mp4
 # Черновые записи браузера; готовые скринкасты сохранены в MP4.
 taskflow-grafana/screencast/page@*.webm

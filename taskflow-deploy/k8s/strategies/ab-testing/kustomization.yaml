@@ -1,0 +1,14 @@
+# A/B: версия выбирается по признаку запроса, а не случайно. Аудитория с
+# заголовком X-User-Group: beta получает вариант B (2.2.0), все остальные —
+# A (2.1.0). Один и тот же пользователь всегда попадает в один вариант.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: taskflow-deploy
+resources:
+  - a
+  - b
+  - httproute.yaml
+labels:
+  - pairs:
+      strategy: ab-testing
+    includeTemplates: true

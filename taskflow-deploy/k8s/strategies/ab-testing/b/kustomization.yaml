@@ -1,0 +1,15 @@
+# Вариант B — версия 2.2.0, только для аудитории с заголовком X-User-Group: beta.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../app
+nameSuffix: -b
+# includeSelectors: метка попадает и в селекторы Deployment/Service, поэтому
+# Service taskflow-b выбирает только поды своей дорожки.
+labels:
+  - pairs:
+      track: b
+    includeSelectors: true
+images:
+  - name: taskflow
+    newTag: "2.2.0"

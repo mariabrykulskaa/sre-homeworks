@@ -1,0 +1,93 @@
+
+# Canary: stable (2.1.0) и canary (2.2.0) рядом; долю canary задаёт weight в HTTPRoute
+$ kubectl apply -k k8s/strategies/canary
+service/taskflow-canary created
+service/taskflow-stable created
+deployment.apps/taskflow-canary created
+deployment.apps/taskflow-stable created
+httproute.gateway.networking.k8s.io/taskflow created
+$ kubectl -n taskflow-deploy get pods -l strategy=canary -o custom-columns=POD:.metadata.name,TRACK:.metadata.labels.track,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,STATUS:.status.phase
+POD                                TRACK    IMAGE            READY   STATUS
+taskflow-canary-5fb7ccf489-5nkd7   canary   taskflow:2.2.0   true    Running
+taskflow-canary-5fb7ccf489-r47v2   canary   taskflow:2.2.0   true    Running
+taskflow-stable-76cffc985-2bscz    stable   taskflow:2.1.0   true    Running
+taskflow-stable-76cffc985-z8tl8    stable   taskflow:2.1.0   true    Running
+  Доля не зависит от числа реплик: по 2 пода у каждой версии, а трафик делится 90/10.
+
+# Шаг 1: 90/10 — новая версия получает 10 % запросов
+$ kubectl -n taskflow-deploy get httproute taskflow -o custom-columns=ROUTE:.metadata.name,HOSTNAMES:.spec.hostnames,BACKENDS:.spec.rules[*].backendRefs[*].name,WEIGHTS:.spec.rules[*].backendRefs[*].weight
+ROUTE      HOSTNAMES          BACKENDS                          WEIGHTS
+taskflow   [taskflow.local]   taskflow-stable,taskflow-canary   90,10
+$ scripts/traffic.sh --duration 12
+14:26:03  2.1.0 ████████████████████  20  2.2.0 ····················   0  ошибок 0
+14:26:04  2.1.0 ████████████████····  16  2.2.0 ████················   4  ошибок 0
+14:26:05  2.1.0 █████████████████···  17  2.2.0 ███·················   3  ошибок 0
+14:26:06  2.1.0 ███████████████████·  19  2.2.0 █···················   1  ошибок 0
+14:26:07  2.1.0 ████████████████████  20  2.2.0 ····················   0  ошибок 0
+14:26:08  2.1.0 ████████████████····  16  2.2.0 ████················   4  ошибок 0
+14:26:09  2.1.0 █████████████████···  17  2.2.0 ███·················   3  ошибок 0
+14:26:10  2.1.0 ███████████████████·  19  2.2.0 █···················   1  ошибок 0
+14:26:11  2.1.0 ████████████████████  20  2.2.0 ····················   0  ошибок 0
+14:26:12  2.1.0 ████████████████····  16  2.2.0 ████················   4  ошибок 0
+14:26:13  2.1.0 █████████████████···  17  2.2.0 ███·················   3  ошибок 0
+14:26:13  2.1.0 ███████████████████·  19  2.2.0 █···················   1  ошибок 0
+Итого: 240 запросов за 12.0 с, ошибок 0 (0.00 %)
+    2.1.0 ████████████████████████████████████····   216   90.0 %
+    2.2.0 ████····································    24   10.0 %
+
+# Шаг 2: 50/50 — ошибок нет, увеличиваем долю canary
+$ kubectl -n taskflow-deploy patch httproute taskflow --type=json -p '[{"op":"replace","path":"/spec/rules/0/backendRefs/0/weight","value":50},{"op":"replace","path":"/spec/rules/0/backendRefs/1/weight","value":50}]'
+httproute.gateway.networking.k8s.io/taskflow patched
+$ kubectl -n taskflow-deploy get httproute taskflow -o custom-columns=ROUTE:.metadata.name,HOSTNAMES:.spec.hostnames,BACKENDS:.spec.rules[*].backendRefs[*].name,WEIGHTS:.spec.rules[*].backendRefs[*].weight
+ROUTE      HOSTNAMES          BACKENDS                          WEIGHTS
+taskflow   [taskflow.local]   taskflow-stable,taskflow-canary   50,50
+$ scripts/traffic.sh --duration 12
+14:26:31  2.1.0 ██████████··········  10  2.2.0 ██████████··········  10  ошибок 0
+14:26:32  2.1.0 ███████████·········  11  2.2.0 █████████···········   9  ошибок 0
+14:26:33  2.1.0 ████████············   8  2.2.0 ████████████········  12  ошибок 0
+14:26:34  2.1.0 ███████████·········  11  2.2.0 █████████···········   9  ошибок 0
+14:26:35  2.1.0 ██████████··········  10  2.2.0 ██████████··········  10  ошибок 0
+14:26:36  2.1.0 ███████████·········  11  2.2.0 █████████···········   9  ошибок 0
+14:26:37  2.1.0 ████████············   8  2.2.0 ████████████········  12  ошибок 0
+14:26:38  2.1.0 ███████████·········  11  2.2.0 █████████···········   9  ошибок 0
+14:26:39  2.1.0 ██████████··········  10  2.2.0 ██████████··········  10  ошибок 0
+14:26:40  2.1.0 ███████████·········  11  2.2.0 █████████···········   9  ошибок 0
+14:26:41  2.1.0 ████████············   8  2.2.0 ████████████········  12  ошибок 0
+14:26:42  2.1.0 ███████████·········  11  2.2.0 █████████···········   9  ошибок 0
+Итого: 240 запросов за 12.0 с, ошибок 0 (0.00 %)
+    2.1.0 ████████████████████····················   120   50.0 %
+    2.2.0 ████████████████████····················   120   50.0 %
+
+# Шаг 3: 0/100 — весь трафик на canary (2.2.0)
+$ kubectl -n taskflow-deploy patch httproute taskflow --type=json -p '[{"op":"replace","path":"/spec/rules/0/backendRefs/0/weight","value":0},{"op":"replace","path":"/spec/rules/0/backendRefs/1/weight","value":100}]'
+httproute.gateway.networking.k8s.io/taskflow patched
+$ kubectl -n taskflow-deploy get httproute taskflow -o custom-columns=ROUTE:.metadata.name,HOSTNAMES:.spec.hostnames,BACKENDS:.spec.rules[*].backendRefs[*].name,WEIGHTS:.spec.rules[*].backendRefs[*].weight
+ROUTE      HOSTNAMES          BACKENDS                          WEIGHTS
+taskflow   [taskflow.local]   taskflow-stable,taskflow-canary   0,100
+$ scripts/traffic.sh --duration 12
+14:26:59  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:00  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:01  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:02  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:03  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:04  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:05  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:06  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:07  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:08  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:09  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+14:27:10  2.1.0 ····················   0  2.2.0 ████████████████████  20  ошибок 0
+Итого: 240 запросов за 12.0 с, ошибок 0 (0.00 %)
+    2.1.0 ········································     0    0.0 %
+    2.2.0 ████████████████████████████████████████   240  100.0 %
+  ждём сброса access-лога Envoy (раз в 10 с)…
+
+# Access-лог Envoy: сколько запросов обслужила каждая версия на каждом шаге
+$ kubectl -n envoy-gateway-system logs -l gateway.envoyproxy.io/owning-gateway-namespace=taskflow-deploy,gateway.envoyproxy.io/owning-gateway-name=eg -c envoy --tail=-1 --since-time=2026-11-21T14:25:34Z | grep "^{" | jq -r --arg s2 2026-11-21T14:26:28.000Z --arg s3 2026-11-21T14:26:57.000Z 'select(.authority=="taskflow.local") | (if .start_time < $s2 then "шаг 1 (90/10) " elif .start_time < $s3 then "шаг 2 (50/50) " else "шаг 3 (0/100) " end) + .app_version + " " + (.response_code|tostring)' | sort | uniq -c
+ 216 шаг 1 (90/10) 2.1.0 200
+  24 шаг 1 (90/10) 2.2.0 200
+ 120 шаг 2 (50/50) 2.1.0 200
+ 120 шаг 2 (50/50) 2.2.0 200
+ 240 шаг 3 (0/100) 2.2.0 200
+  Дальше — продвижение: stable обновляют до 2.2.0 и возвращают ему 100 %, canary удаляют.
+  Логи сохранены: logs/3-canary.envoy.log, logs/3-canary.app.log

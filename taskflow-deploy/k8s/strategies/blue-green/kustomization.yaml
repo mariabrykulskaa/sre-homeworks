@@ -1,0 +1,16 @@
+# Blue/Green: обе версии развёрнуты целиком (по 2 реплики). Пользователи идут
+# на blue; green проверяется по отдельному имени preview.taskflow.local.
+# Переключение — одна правка backendRefs в HTTPRoute: весь трафик уходит на
+# green сразу. Откат — та же правка обратно; blue всё это время работает.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: taskflow-deploy
+resources:
+  - blue
+  - green
+  - httproute.yaml
+  - httproute-preview.yaml
+labels:
+  - pairs:
+      strategy: blue-green
+    includeTemplates: true

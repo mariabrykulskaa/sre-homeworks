@@ -1,0 +1,23 @@
+# Точка входа: один HTTP-слушатель на порту 80. Маршруты (HTTPRoute) каждой
+# стратегии прикрепляются к нему через parentRefs: eg и решают, в какую
+# версию отправить запрос.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: taskflow-deploy
+spec:
+  gatewayClassName: eg
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: taskflow-proxy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      # Маршруты — только из этого namespace (значение по умолчанию, указано явно).
+      allowedRoutes:
+        namespaces:
+          from: Same

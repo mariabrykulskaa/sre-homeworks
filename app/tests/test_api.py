@@ -107,6 +107,26 @@ def test_access_log_and_request_id(client):
     assert client.logs.records()[-1]["level"] == "warn"
 
 
+def test_version_endpoint_and_identity_headers(make_client):
+    from taskflow import __version__
+
+    client = make_client(POD_NAME="taskflow-v2-abc")
+    assert client.get("/api/version").json() == {
+        "service": "taskflow", "version": __version__, "instance": "taskflow-v2-abc",
+    }
+    # Версия и реплика — в любом ответе: API, ошибке, статике.
+    for path, status in (("/api/projects", 200), ("/api/projects/999999", 404), ("/", 200)):
+        res = client.get(path)
+        assert res.status_code == status
+        assert res.headers["x-app-version"] == __version__
+        assert res.headers["x-served-by"] == "taskflow-v2-abc"
+    # Host попадает в access-лог: видно, по какому имени запрос пришёл через шлюз.
+    client.get("/api/version", headers={"host": "preview.taskflow.local", "x-request-id": "preview-1"})
+    record = [r for r in client.logs.records() if r.get("request_id") == "preview-1"][-1]
+    assert record["host"] == "preview.taskflow.local"
+    assert record["service.version"] == __version__
+
+
 def test_fault_injection_breaks_data_routes_but_not_probes(make_client):
     faulty = make_client(FAULT_ERROR_RATE="1")
     before = requests_count("/api/projects", 500)

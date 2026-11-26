@@ -1,0 +1,18 @@
+# ClusterIP Service — адресат backendRefs в HTTPRoute. Сам Envoy ходит не на
+# виртуальный IP, а напрямую на поды из EndpointSlice этого Service: так он
+# балансирует каждый запрос, а не соединение, и видит готовность реплик.
+apiVersion: v1
+kind: Service
+metadata:
+  name: taskflow
+  labels:
+    app.kubernetes.io/name: taskflow
+    app.kubernetes.io/part-of: taskflow
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: taskflow
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

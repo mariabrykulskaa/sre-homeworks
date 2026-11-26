@@ -5,6 +5,8 @@ RequestContextMiddleware — внешний слой:
     новый UUID; возвращается клиенту и попадает в каждую строку лога запроса —
     по нему в Victoria Logs собирается вся история одного вызова;
   * защитные заголовки ответа (CSP, X-Frame-Options и др.);
+  * X-App-Version и X-Served-By — версия и реплика, ответившие на запрос: по ним
+    видно, куда шлюз направил запрос при выкатке (ДЗ №8);
   * access-лог: одна JSON-строка на запрос (XI фактор);
   * HTTP-метрика http_request_duration_seconds{method, route, status_code};
   * непредвиденная ошибка → лог «unhandled error» и ответ 500.
@@ -79,10 +81,13 @@ def _header(scope: dict, name: bytes) -> str | None:
 
 
 class RequestContextMiddleware:
-    def __init__(self, app, logger: Logger, histogram) -> None:
+    def __init__(self, app, logger: Logger, histogram, instance: str = "") -> None:
         self.app = app
         self.logger = logger
         self.histogram = histogram
+        self.identity_headers = [(b"x-app-version", logger.version.encode())]
+        if instance:
+            self.identity_headers.append((b"x-served-by", instance.encode()))
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -101,6 +106,7 @@ class RequestContextMiddleware:
                 outcome["status"] = message["status"]
                 headers = list(message.get("headers", []))
                 headers.extend(SECURITY_HEADERS)
+                headers.extend(self.identity_headers)
                 headers.append((b"x-request-id", request_id.encode()))
                 message = {**message, "headers": headers}
             elif message["type"] == "http.response.body" and not message.get("more_body", False):
@@ -146,6 +152,9 @@ class RequestContextMiddleware:
         getattr(log, level_for_status(status))(
             "request",
             method=method,
+            # Host запроса: за шлюзом одна реплика может получать запросы на
+            # разные имена (taskflow.local, preview.taskflow.local в blue/green).
+            host=_header(scope, b"host"),
             path=scope.get("path", ""),
             query=query[:QUERY_MAX_LENGTH] or None,
             status=status,

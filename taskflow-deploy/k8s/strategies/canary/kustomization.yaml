@@ -1,0 +1,13 @@
+# Canary: обе версии работают рядом, долю трафика задают веса backendRefs в
+# HTTPRoute — независимо от числа реплик. Ramp: 90/10 → 50/50 → 0/100.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: taskflow-deploy
+resources:
+  - stable
+  - canary
+  - httproute.yaml
+labels:
+  - pairs:
+      strategy: canary
+    includeTemplates: true

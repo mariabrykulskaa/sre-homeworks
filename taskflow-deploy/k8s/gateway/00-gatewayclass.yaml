@@ -1,0 +1,12 @@
+# Envoy Gateway — реализация Gateway API на Envoy Proxy. Контроллер
+# (Deployment envoy-gateway в namespace envoy-gateway-system) ставится
+# scripts/install-envoy-gateway.sh. Как в quickstart Envoy Gateway:
+# GatewayClass `eg` → Gateway `eg` → HTTPRoute приложения.
+#
+# GatewayClass — «какой реализацией обслуживать шлюзы» (кластерный объект).
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller

@@ -1,0 +1,15 @@
+# Blue — текущая версия 2.1.0; на неё смотрит маршрут до переключения и после отката.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../app
+nameSuffix: -blue
+# includeSelectors: метка попадает и в селекторы Deployment/Service, поэтому
+# Service taskflow-blue выбирает только поды своей дорожки.
+labels:
+  - pairs:
+      track: blue
+    includeSelectors: true
+images:
+  - name: taskflow
+    newTag: "2.1.0"

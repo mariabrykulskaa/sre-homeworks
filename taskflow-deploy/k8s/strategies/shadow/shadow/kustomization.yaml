@@ -1,0 +1,15 @@
+# Shadow — версия 2.2.0, получает копии запросов; её ответы Envoy отбрасывает.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../app
+nameSuffix: -shadow
+# includeSelectors: метка попадает и в селекторы Deployment/Service, поэтому
+# Service taskflow-shadow выбирает только поды своей дорожки.
+labels:
+  - pairs:
+      track: shadow
+    includeSelectors: true
+images:
+  - name: taskflow
+    newTag: "2.2.0"

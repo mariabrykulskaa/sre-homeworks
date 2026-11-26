@@ -6,6 +6,7 @@
 """
 
 import os
+import socket
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
@@ -24,6 +25,7 @@ class Config:
     fault_error_rate: float
     fault_latency_ms: int
     fault_memory_mb: int
+    instance: str
 
 
 def _require(env: dict, name: str) -> str:
@@ -69,4 +71,8 @@ def load_config(env: dict | None = None) -> Config:
         fault_error_rate=parse_error_rate(env.get("FAULT_ERROR_RATE")),
         fault_latency_ms=parse_latency_ms(env.get("FAULT_LATENCY_MS")),
         fault_memory_mb=parse_memory_mb(env.get("FAULT_MEMORY_MB")),
+        # Имя экземпляра — какая реплика ответила (заголовок X-Served-By,
+        # /api/version). В Kubernetes — имя пода из Downward API (POD_NAME);
+        # без него — имя хоста (в поде оно и так совпадает с именем пода).
+        instance=env.get("POD_NAME") or socket.gethostname(),
     )

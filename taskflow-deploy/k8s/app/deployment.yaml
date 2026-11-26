@@ -1,0 +1,177 @@
+# TaskFlow — stateless HTTP-сервис: всё состояние в PostgreSQL, поэтому любую
+# реплику можно остановить, заменить или переключить на другую версию без
+# потери данных. Это база kustomize: стратегии (k8s/strategies/*) берут её
+# один или два раза, добавляя суффикс имени (-blue, -canary, …), метку track
+# и тег образа.
+#
+# Что нужно приложению для работы в нескольких подах и для выкатки без простоя:
+#   * replicas ≥ 2 и мягкая anti-affinity — реплики разносятся по узлам;
+#   * readinessProbe (/api/ready, ходит в БД) — Envoy шлёт запросы только на
+#     готовые поды: Envoy Gateway берёт адреса из EndpointSlice, а туда
+#     неготовый под попадает с ready: false;
+#   * livenessProbe (/api/health, без БД) — перезапуск зависшего процесса;
+#   * preStop sleep 5 + корректное завершение uvicorn — под успевает выйти из
+#     балансировки до SIGTERM и дорабатывает начатые запросы;
+#   * minReadySeconds — новая реплика считается доступной, только простояв
+#     готовой 5 с: RollingUpdate не гасит старую, пока новая не «устоялась»;
+#   * версия в каждом ответе (X-App-Version), в /api/version, в логах
+#     (service.version) и в метрике taskflow_build_info.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskflow
+  labels:
+    app.kubernetes.io/name: taskflow
+    app.kubernetes.io/part-of: taskflow
+spec:
+  replicas: 2
+  minReadySeconds: 5
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taskflow
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Ни одной реплики меньше нужного, на одну больше во время выкатки.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taskflow
+        app.kubernetes.io/part-of: taskflow
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: taskflow
+      initContainers:
+        - name: wait-for-db
+          image: postgres:17-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                echo "waiting for postgres at $DB_HOST:$DB_PORT"
+                sleep 2
+              done
+          envFrom:
+            - configMapRef:
+                name: taskflow-config
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        # Миграции — тем же образом, что и приложение (XII фактор). Во время
+        # выкатки новая версия мигрирует базу, пока старая ещё обслуживает
+        # трафик, поэтому миграции должны быть обратно совместимыми
+        # (expand/contract): обе версии работают с одной схемой одновременно.
+        - name: migrate
+          image: taskflow:2.1.0
+          imagePullPolicy: Never
+          command: ["python", "-m", "taskflow.migrate"]
+          envFrom:
+            - configMapRef:
+                name: taskflow-config
+          env: &app-env
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: taskflow-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: taskflow-config
+                  key: DB_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: taskflow-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: taskflow-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: taskflow-db-credentials
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(POSTGRES_DB)
+            # Downward API: имя пода — в заголовок X-Served-By и /api/version.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext: *restricted
+      containers:
+        - name: taskflow
+          image: taskflow:2.1.0
+          # Образы собраны в minikube (scripts/build-images.sh), в реестре их нет.
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 3000
+            - name: metrics
+              containerPort: 9464
+          env: *app-env
+          envFrom:
+            - configMapRef:
+                name: taskflow-config
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext: *restricted

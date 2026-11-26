@@ -1,0 +1,15 @@
+# Canary — новая версия 2.2.0, получает долю трафика по весу в HTTPRoute.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../app
+nameSuffix: -canary
+# includeSelectors: метка попадает и в селекторы Deployment/Service, поэтому
+# Service taskflow-canary выбирает только поды своей дорожки.
+labels:
+  - pairs:
+      track: canary
+    includeSelectors: true
+images:
+  - name: taskflow
+    newTag: "2.2.0"

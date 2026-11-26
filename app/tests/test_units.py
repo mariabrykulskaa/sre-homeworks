@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+import socket
 import urllib.error
 import urllib.request
 
@@ -64,6 +65,17 @@ def test_config_requires_database_url_and_distinct_ports():
         load_config({"DATABASE_URL": "x", "FAULT_ERROR_RATE": "2"})
     config = load_config({"DATABASE_URL": "x"})
     assert (config.port, config.metrics_port, config.host, config.rate_limit) == (3000, 9464, "127.0.0.1", 600)
+
+
+def test_config_instance_from_pod_name_or_hostname():
+    assert load_config({"DATABASE_URL": "x", "POD_NAME": "taskflow-7d9c-x2k"}).instance == "taskflow-7d9c-x2k"
+    assert load_config({"DATABASE_URL": "x"}).instance == socket.gethostname()
+
+
+def test_build_info_metric_reports_version():
+    from taskflow import __version__
+
+    assert metrics.registry.get_sample_value("taskflow_build_info", {"version": __version__}) == 1.0
 
 
 # --- logger -------------------------------------------------------------------

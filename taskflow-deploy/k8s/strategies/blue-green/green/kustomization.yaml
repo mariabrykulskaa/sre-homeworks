@@ -1,0 +1,15 @@
+# Green — новая версия 2.2.0, развёрнута рядом с blue в полном объёме до переключения.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../app
+nameSuffix: -green
+# includeSelectors: метка попадает и в селекторы Deployment/Service, поэтому
+# Service taskflow-green выбирает только поды своей дорожки.
+labels:
+  - pairs:
+      track: green
+    includeSelectors: true
+images:
+  - name: taskflow
+    newTag: "2.2.0"

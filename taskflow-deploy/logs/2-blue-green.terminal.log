@@ -1,0 +1,92 @@
+
+# Blue/Green: blue (2.1.0) и green (2.2.0) работают рядом, пользователи — на blue
+$ kubectl apply -k k8s/strategies/blue-green
+service/taskflow-blue created
+service/taskflow-green created
+deployment.apps/taskflow-blue created
+deployment.apps/taskflow-green created
+httproute.gateway.networking.k8s.io/taskflow created
+httproute.gateway.networking.k8s.io/taskflow-preview created
+$ kubectl -n taskflow-deploy get pods -l strategy=blue-green -o custom-columns=POD:.metadata.name,TRACK:.metadata.labels.track,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,STATUS:.status.phase
+POD                               TRACK   IMAGE            READY   STATUS
+taskflow-blue-75fcc88fcc-5twfz    blue    taskflow:2.1.0   true    Running
+taskflow-blue-75fcc88fcc-tsbt7    blue    taskflow:2.1.0   true    Running
+taskflow-green-546ff59c9c-q7r24   green   taskflow:2.2.0   true    Running
+taskflow-green-546ff59c9c-wldz7   green   taskflow:2.2.0   true    Running
+$ kubectl -n taskflow-deploy get httproute -o custom-columns=ROUTE:.metadata.name,HOSTNAMES:.spec.hostnames,BACKENDS:.spec.rules[*].backendRefs[*].name,WEIGHTS:.spec.rules[*].backendRefs[*].weight
+ROUTE              HOSTNAMES                  BACKENDS         WEIGHTS
+taskflow           [taskflow.local]           taskflow-blue    1
+taskflow-preview   [preview.taskflow.local]   taskflow-green   1
+
+# Пользовательский адрес — blue; green проверяем через тот же шлюз по имени preview.taskflow.local
+$ curl -s -H 'Host: taskflow.local' http://127.0.0.1:8888/api/version; echo
+{"service":"taskflow","version":"2.1.0","instance":"taskflow-blue-75fcc88fcc-tsbt7"}
+$ curl -s -H 'Host: preview.taskflow.local' http://127.0.0.1:8888/api/version; echo
+{"service":"taskflow","version":"2.2.0","instance":"taskflow-green-546ff59c9c-q7r24"}
+$ curl -s -o /dev/null -w 'preview /api/projects → %{http_code}\n' -H 'Host: preview.taskflow.local' http://127.0.0.1:8888/api/projects
+preview /api/projects → 200
+
+# Трафик 20 запросов/с; переключение на green, затем откат на blue
+$ scripts/traffic.sh --duration 32 --pods &
+13:49:37  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:49:38  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:49:39  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:49:40  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:49:41  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:49:42  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:49:43  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+# переключение: blue → green
+$ kubectl -n taskflow-deploy patch httproute taskflow --type=json -p '[{"op":"replace","path":"/spec/rules/0/backendRefs/0/name","value":"taskflow-green"}]'
+httproute.gateway.networking.k8s.io/taskflow patched
+13:49:44  2.1.0 ███████████████████·  19 [2]  2.2.0 █···················   1 [1]  ошибок 0
+13:49:45  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:46  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:47  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:48  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:49  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:50  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:51  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:52  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:53  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:54  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:55  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+# откат: green → blue (blue не останавливали — откат мгновенный)
+$ kubectl -n taskflow-deploy patch httproute taskflow --type=json -p '[{"op":"replace","path":"/spec/rules/0/backendRefs/0/name","value":"taskflow-blue"}]'
+httproute.gateway.networking.k8s.io/taskflow patched
+13:49:56  2.1.0 ····················   0 [0]  2.2.0 ████████████████████  20 [2]  ошибок 0
+13:49:57  2.1.0 ██████████████████··  18 [2]  2.2.0 ██··················   2 [1]  ошибок 0
+13:49:58  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:49:59  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:00  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:01  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:02  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:03  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:04  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:05  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:06  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:07  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+13:50:07  2.1.0 ████████████████████  20 [2]  2.2.0 ····················   0 [0]  ошибок 0
+Итого: 640 запросов за 32.0 с, ошибок 0 (0.00 %)
+    2.1.0 █████████████████████████···············   397   62.0 %
+    2.2.0 ███████████████·························   243   38.0 %
+
+# Маршрут снова на blue; green работает и ждёт следующей попытки
+$ kubectl -n taskflow-deploy get httproute taskflow -o custom-columns=ROUTE:.metadata.name,HOSTNAMES:.spec.hostnames,BACKENDS:.spec.rules[*].backendRefs[*].name,WEIGHTS:.spec.rules[*].backendRefs[*].weight
+ROUTE      HOSTNAMES          BACKENDS        WEIGHTS
+taskflow   [taskflow.local]   taskflow-blue   1
+$ kubectl -n taskflow-deploy get pods -l strategy=blue-green -o custom-columns=POD:.metadata.name,TRACK:.metadata.labels.track,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,STATUS:.status.phase
+POD                               TRACK   IMAGE            READY   STATUS
+taskflow-blue-75fcc88fcc-5twfz    blue    taskflow:2.1.0   true    Running
+taskflow-blue-75fcc88fcc-tsbt7    blue    taskflow:2.1.0   true    Running
+taskflow-green-546ff59c9c-q7r24   green   taskflow:2.2.0   true    Running
+taskflow-green-546ff59c9c-wldz7   green   taskflow:2.2.0   true    Running
+  ждём сброса access-лога Envoy (раз в 10 с)…
+
+# Access-лог Envoy: непрерывные отрезки ответов одной версии (время UTC)
+$ kubectl -n envoy-gateway-system logs -l gateway.envoyproxy.io/owning-gateway-namespace=taskflow-deploy,gateway.envoyproxy.io/owning-gateway-name=eg -c envoy --tail=-1 --since-time=2026-11-21T13:48:56Z | grep "^{" | jq -r 'select(.authority=="taskflow.local") | "\(.start_time[11:23]) \(.app_version) \(.response_code)"' | awk '$2!=v {if (v) print v, n, "запросов", t0, "→", t1; v=$2; n=0; t0=$1} {n++; t1=$1} END {print v, n, "запросов", t0, "→", t1}'
+2.1.0 160 запросов 13:49:25.665 → 13:49:43.662
+2.2.0 243 запросов 13:49:43.710 → 13:49:55.811
+2.1.0 238 запросов 13:49:55.854 → 13:50:07.713
+$ kubectl -n envoy-gateway-system logs -l gateway.envoyproxy.io/owning-gateway-namespace=taskflow-deploy,gateway.envoyproxy.io/owning-gateway-name=eg -c envoy --tail=-1 --since-time=2026-11-21T13:48:56Z | grep "^{" | jq -r 'select(.authority=="taskflow.local") | .response_code' | sort | uniq -c
+ 641 200
+  Логи сохранены: logs/2-blue-green.envoy.log, logs/2-blue-green.app.log

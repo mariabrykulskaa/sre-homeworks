@@ -43,7 +43,9 @@ def create_app(config: Config, logger: Logger, db: Database | None = None) -> Fa
     # Последний добавленный middleware — внешний: сначала контекст запроса
     # (лог, метрики, request_id), внутри него — лимит запросов.
     app.add_middleware(RateLimitMiddleware, limit=config.rate_limit)
-    app.add_middleware(RequestContextMiddleware, logger=logger, histogram=http_request_duration)
+    app.add_middleware(
+        RequestContextMiddleware, logger=logger, histogram=http_request_duration, instance=config.instance
+    )
 
     @app.exception_handler(HttpError)
     async def http_error(request: Request, exc: HttpError):
@@ -69,6 +71,13 @@ def create_app(config: Config, logger: Logger, db: Database | None = None) -> Fa
             request.state.log.error("readiness check failed", error=err)
             return JSONResponse({"status": "degraded"}, status_code=503)
         return {"status": "ready"}
+
+    # Какая версия и какая реплика ответили. То же есть в заголовках
+    # X-App-Version / X-Served-By любого ответа, в поле service.version каждой
+    # строки лога и в метрике taskflow_build_info.
+    @app.get("/api/version")
+    async def version():
+        return {"service": logger.service, "version": logger.version, "instance": config.instance}
 
     app.include_router(projects.router)
     app.include_router(tasks.router)

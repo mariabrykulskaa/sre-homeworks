@@ -19,6 +19,7 @@
 | 5 | [`taskflow-sla/`](taskflow-sla/) | SLI, SLO, SLA: пробер, правила vmalert, дашборд Grafana | [Отчёт.md](taskflow-sla/Отчёт.md) |
 | 6 | [`taskflow-alerts/`](taskflow-alerts/) | алерты на метрики сервиса и рантайма Python, Alertmanager, уведомления на почту | [Отчёт.md](taskflow-alerts/Отчёт.md) |
 | 7 | [`taskflow-grafana/`](taskflow-grafana/) | Grafana: RED, рантайм Python, SLA пробера, импорт PostgreSQL Exporter | [Отчёт.md](taskflow-grafana/Отчёт.md) |
+| 8 | [`taskflow-deploy/`](taskflow-deploy/) | стратегии выкатки через Envoy Gateway (Gateway API): Rolling, Blue/Green, Canary, A/B, Shadow | [Отчёт.md](taskflow-deploy/Отчёт.md) |
 
 Инструкции по запуску — в `README.md` каждого каталога. Архив для сдачи собирает
 `scripts/make-archive.sh` в каталоге задания; для Grafana — `python3 scripts/make-archive.py`.

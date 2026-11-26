@@ -19,10 +19,13 @@ from prometheus_client import (
     Gauge,
     Histogram,
     GCCollector,
+    Info,
     PlatformCollector,
     ProcessCollector,
     disable_created_metrics,
 )
+
+from . import __version__
 
 TASK_STATUSES = ("todo", "in_progress", "done")
 
@@ -44,6 +47,12 @@ registry = CollectorRegistry()
 ProcessCollector(registry=registry)
 GCCollector(registry=registry)
 PlatformCollector(registry=registry)
+
+# Версия сборки: taskflow_build_info{version="2.1.0"} 1. Во время выкатки
+# count by (version) (taskflow_build_info) показывает, сколько реплик какой
+# версии сейчас работает (ДЗ №8).
+build_info = Info("taskflow_build", "Version of the running TaskFlow build", registry=registry)
+build_info.info({"version": __version__})
 
 # HTTP: гистограмма даёт сразу и RPS/ошибки (_count), и перцентили (_bucket).
 # Метка route — шаблон маршрута (/api/projects/:id), а не путь с id: иначе каждый

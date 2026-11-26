@@ -1,0 +1,18 @@
+# Rolling update: один Deployment, версия меняется на месте. Kubernetes
+# заменяет реплики по одной (maxSurge: 1, maxUnavailable: 0, minReadySeconds: 5),
+# Envoy направляет запросы только на готовые поды — старой и новой версии
+# одновременно, пока выкатка не закончится.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: taskflow-deploy
+resources:
+  - ../../app
+  - httproute.yaml
+# Четыре реплики — чтобы постепенная замена была видна в распределении трафика.
+replicas:
+  - name: taskflow
+    count: 4
+labels:
+  - pairs:
+      strategy: rolling
+    includeTemplates: true

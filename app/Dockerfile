@@ -27,6 +27,14 @@ USER 1000
 # Внутри контейнера слушаем все интерфейсы — наружу порт публикует Docker.
 ENV HOST=0.0.0.0
 
+# Версия сборки (ДЗ №8): docker build --build-arg APP_VERSION=2.2.0 …
+# Попадает в /api/version, заголовок X-App-Version, логи и taskflow_build_info.
+# Объявлена в конце, чтобы смена версии не сбрасывала кэш слоёв выше.
+ARG APP_VERSION=2.1.0
+ENV APP_VERSION=${APP_VERSION}
+LABEL org.opencontainers.image.title="taskflow" \
+      org.opencontainers.image.version="${APP_VERSION}"
+
 # 3000 — приложение, 9464 — /metrics (METRICS_PORT) для системы мониторинга.
 EXPOSE 3000 9464
 

@@ -1,0 +1,9 @@
+# Отдельный namespace для ДЗ №8: стенд прошлых ДЗ (namespace taskflow, пробер,
+# мониторинг) продолжает работать как был, а стратегии выкатки можно свободно
+# применять и удалять, не задевая его.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: taskflow-deploy
+  labels:
+    app.kubernetes.io/part-of: taskflow

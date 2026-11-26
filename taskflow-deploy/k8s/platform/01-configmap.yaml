@@ -1,0 +1,24 @@
+# Несекретная конфигурация (III фактор). Общая для всех версий и всех
+# стратегий: старая и новая версии читают одну и ту же базу.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taskflow-config
+  namespace: taskflow-deploy
+  labels:
+    app.kubernetes.io/part-of: taskflow
+data:
+  PORT: "3000"
+  METRICS_PORT: "9464"
+  APP_ENV: production
+  LOG_LEVEL: info
+  # Лимит запросов считается по IP клиента. За шлюзом все запросы приходят
+  # с IP пода Envoy, и 600 в минуту на реплику — это лимит на всех
+  # пользователей сразу: демонстрационный трафик (20 запросов/с) получил бы 429.
+  # Поднимаем лимит; ограничивать частоту правильнее на шлюзе (BackendTrafficPolicy
+  # rateLimit по реальному IP клиента).
+  RATE_LIMIT_PER_MINUTE: "100000"
+  DB_HOST: db
+  DB_PORT: "5432"
+  POSTGRES_DB: taskflow
+  POSTGRES_USER: taskflow

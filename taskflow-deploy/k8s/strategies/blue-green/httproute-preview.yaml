@@ -1,0 +1,15 @@
+# Предпросмотр: green доступен по отдельному имени ещё до переключения —
+# новую версию проверяют через тот же шлюз, не трогая пользователей.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: taskflow-preview
+spec:
+  parentRefs:
+    - name: eg
+  hostnames:
+    - preview.taskflow.local
+  rules:
+    - backendRefs:
+        - name: taskflow-green
+          port: 80

@@ -1,0 +1,20 @@
+# Политика соединений Envoy → поды приложения для всех маршрутов шлюза.
+#
+# uvicorn закрывает простаивающее keep-alive соединение через 5 с, а Envoy по
+# умолчанию держит его час. Если Envoy отправит запрос в соединение, которое
+# реплика как раз закрывает, клиент получит 503 (reset). Во время выкатки
+# реплики закрываются массово, и гонка становится заметной. Держим соединение
+# в пуле Envoy меньше, чем его держит приложение.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: taskflow-upstream
+  namespace: taskflow-deploy
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: eg
+  timeout:
+    http:
+      connectionIdleTimeout: 4s

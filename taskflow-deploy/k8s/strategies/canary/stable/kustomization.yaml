@@ -1,0 +1,15 @@
+# Stable — текущая версия 2.1.0, получает основную долю трафика.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../app
+nameSuffix: -stable
+# includeSelectors: метка попадает и в селекторы Deployment/Service, поэтому
+# Service taskflow-stable выбирает только поды своей дорожки.
+labels:
+  - pairs:
+      track: stable
+    includeSelectors: true
+images:
+  - name: taskflow
+    newTag: "2.1.0"

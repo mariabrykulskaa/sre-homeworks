@@ -1,0 +1,15 @@
+# Shadow (mirroring): пользователям отвечает primary (2.1.0), а Envoy
+# отправляет копию каждого читающего запроса в shadow (2.2.0) и отбрасывает её
+# ответ. Новая версия проверяется на настоящем трафике без влияния на
+# пользователей.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: taskflow-deploy
+resources:
+  - primary
+  - shadow
+  - httproute.yaml
+labels:
+  - pairs:
+      strategy: shadow
+    includeTemplates: true
